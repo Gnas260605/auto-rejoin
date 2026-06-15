@@ -214,84 +214,141 @@ start_bot() {
     done
 }
 
-# Giao diện MENU điều khiển
+# Bảng theo dõi trạng thái trực quan các bản Clone
+show_status_monitor() {
+    clear
+    echo -e "${CYAN}====================================================${NC}"
+    echo -e "${GREEN}       BẢNG GIÁM SÁT TRẠNG THÁI ROBLOX CLONES       ${NC}"
+    echo -e "${CYAN}====================================================${NC}"
+    
+    local config_files=$(ls config_com*.cfg 2>/dev/null)
+    if [ -z "$config_files" ]; then
+        config_files="config.cfg"
+    fi
+    
+    local ps_info
+    ps_info=$(run_cmd "ps -A")
+    if [ -z "$ps_info" ]; then
+        ps_info=$(run_cmd "ps")
+    fi
+    
+    for cfg in $config_files; do
+        if [ -f "$cfg" ]; then
+            local tmp_pkg=""
+            local tmp_place=""
+            source "$cfg" >/dev/null 2>&1
+            tmp_pkg="$ROBLOX_PACKAGE"
+            tmp_place="$PLACE_ID"
+            
+            if [ -z "$tmp_pkg" ]; then
+                continue
+            fi
+            
+            local window_name="${tmp_pkg//./_}"
+            local is_in_tmux="${RED}🔴 Tắt${NC}"
+            if tmux list-windows -t roblox-multi 2>/dev/null | grep -q "$window_name"; then
+                is_in_tmux="${GREEN}🟢 Chạy ngầm (tmux)${NC}"
+            fi
+            
+            local run_status="${RED}[🔴 OFFLINE - Game đã đóng]${NC}"
+            if echo "$ps_info" | grep -q "$tmp_pkg"; then
+                run_status="${GREEN}[🟢 ONLINE - Đang mở]${NC}"
+            fi
+            
+            local log_file="roblox_${tmp_pkg}.log"
+            local last_log="Chưa có lịch sử hoạt động"
+            if [ -f "$log_file" ]; then
+                last_log=$(tail -n 1 "$log_file" 2>/dev/null | cut -c 1-60)
+            fi
+            
+            echo -e "👉 Bản Clone: ${YELLOW}${window_name}${NC}"
+            echo -e "   Trạng thái App: $run_status"
+            echo -e "   Trình giám sát: $is_in_tmux"
+            echo -e "   Log cuối: ${CYAN}${last_log}${NC}"
+            echo -e "----------------------------------------------------"
+        fi
+    done
+    echo ""
+    echo -e "Bấm phím bất kỳ để ${YELLOW}TẢI LẠI TRẠNG THÁI${NC}, hoặc gõ '${RED}q${NC}' để quay lại Menu."
+    read -n 1 -r key
+    if [ "$key" != "q" ] && [ "$key" != "Q" ]; then
+        show_status_monitor
+    fi
+}
+
+# Giao diện MENU điều khiển rút gọn chống lỗi tràn dòng
 menu() {
     load_config
     while true; do
         clear
-        echo -e "${CYAN}====================================================${NC}"
-        echo -e "${CYAN}       HỆ THỐNG ĐIỀU KHIỂN ROBLOX AUTO REJOIN       ${NC}"
-        echo -e "${CYAN}====================================================${NC}"
-        echo -e " 1. ${GREEN}KHỞI CHẠY BOT (START)${NC}"
-        echo -e " 2. Cài đặt Place ID Game ${YELLOW}(Hiện tại: $PLACE_ID)${NC}"
-        echo -e " 3. Cài đặt Code Server riêng (Private Server) ${YELLOW}(Hiện tại: $PRIVATE_CODE)${NC}"
-        echo -e " 4. Cấu hình Package Name Roblox ${YELLOW}(Hiện tại: $ROBLOX_PACKAGE)${NC}"
-        echo -e " 5. Cài đặt Discord Webhook ${YELLOW}(Hiện tại: $DISCORD_WEBHOOK)${NC}"
-        echo -e " 6. Bật/Tắt Anti-AFK Tapping ${YELLOW}(Hiện tại: $ANTI_AFK)${NC}"
-        echo -e " 7. Thay đổi tọa độ Anti-AFK ${YELLOW}(Hiện tại: X:$TAP_X, Y:$TAP_Y)${NC}"
-        echo -e " 8. Đổi chu kỳ kiểm tra & Restart ${YELLOW}(Check: ${CHECK_INTERVAL}s, Restart: ${AUTO_RESTART_PERIOD}s)${NC}"
-        echo -e " 9. Xem nhật ký hoạt động (Xem Log)"
-        echo -e " 10. Thoát"
-        echo -e "${CYAN}====================================================${NC}"
-        echo -n "Chọn chức năng (1-10): "
+        echo -e "${CYAN}==========================================${NC}"
+        echo -e "${GREEN}      ROBLOX AUTO REJOIN CONTROL PANEL    ${NC}"
+        echo -e "${CYAN}==========================================${NC}"
+        echo -e " 1. ${GREEN}Xem trạng thái các bản Clone (MONITOR)${NC}"
+        echo -e " 2. Khởi động lại tất cả Acc (Restart All)"
+        echo -e " 3. ${RED}Dừng tất cả Acc chạy ngầm (Stop All)${NC}"
+        echo -e " 4. Xem Log chi tiết của từng Acc"
+        echo -e " 5. Đổi Place ID Game ${YELLOW}(Hiện tại: $PLACE_ID)${NC}"
+        echo -e " 6. Đổi Code Server riêng ${YELLOW}(Hiện tại: $PRIVATE_CODE)${NC}"
+        echo -e " 7. Thoát"
+        echo -e "${CYAN}==========================================${NC}"
+        echo -n "Chọn (1-7): "
         read opt
         
         case $opt in
             1)
-                start_bot
+                show_status_monitor
                 ;;
             2)
+                echo "[*] Đang khởi động lại toàn bộ bot..."
+                ./setup.sh "$PLACE_ID" "$PRIVATE_CODE"
+                sleep 2
+                ;;
+            3)
+                echo -e "${RED}[*] Đang dừng tất cả tiến trình chạy ngầm...${NC}"
+                tmux kill-session -t roblox-multi 2>/dev/null
+                # Force close tất cả app roblox
+                local config_files=$(ls config_com*.cfg 2>/dev/null)
+                for cfg in $config_files; do
+                    if [ -f "$cfg" ]; then
+                        local tmp_pkg=""
+                        source "$cfg" >/dev/null 2>&1
+                        if [ -n "$ROBLOX_PACKAGE" ]; then
+                            run_cmd "am force-stop $ROBLOX_PACKAGE"
+                        fi
+                    fi
+                done
+                echo "Đã dừng và tắt tất cả game."
+                sleep 2
+                ;;
+            4)
+                clear
+                echo "---- CÁC FILE LOG HIỆN CÓ ----"
+                ls roblox_*.log 2>/dev/null || echo "Không tìm thấy file log nào."
+                echo -n "Nhập tên file log muốn xem (Ví dụ: roblox_com.roblox.client1.log): "
+                read log_select
+                if [ -f "$log_select" ]; then
+                    clear
+                    echo "---- LỊCH SỬ HOẠT ĐỘNG: $log_select (Bấm q để thoát) ----"
+                    tail -n 50 "$log_select"
+                    echo "Nhấn Enter để quay lại..."
+                    read
+                else
+                    echo "File log không tồn tại!"
+                    sleep 1.5
+                fi
+                ;;
+            5)
                 echo -n "Nhập Place ID Game mới: "
                 read PLACE_ID
                 save_config
                 ;;
-            3)
-                echo -n "Nhập Code Private Server mới (Để trống nếu không dùng): "
+            6)
+                echo -n "Nhập Code Private Server mới: "
                 read PRIVATE_CODE
                 save_config
                 ;;
-            4)
-                echo -e "Chọn hoặc nhập Package Name của bản Roblox clone:"
-                echo "Gốc mặc định: com.roblox.client"
-                echo -n "Nhập Package Name tùy chỉnh: "
-                read ROBLOX_PACKAGE
-                save_config
-                ;;
-            5)
-                echo -n "Nhập Discord Webhook Link (Để trống nếu bỏ qua): "
-                read DISCORD_WEBHOOK
-                save_config
-                ;;
-            6)
-                if [ "$ANTI_AFK" = true ]; then
-                    ANTI_AFK=false
-                else
-                    ANTI_AFK=true
-                fi
-                save_config
-                ;;
             7)
-                echo -n "Nhập tọa độ X: "
-                read TAP_X
-                echo -n "Nhập tọa độ Y: "
-                read TAP_Y
-                save_config
-                ;;
-            8)
-                echo -n "Nhập thời gian kiểm tra trạng thái game (giây): "
-                read CHECK_INTERVAL
-                echo -n "Nhập thời gian tự động Restart để giảm giật (giây, 0 để tắt): "
-                read AUTO_RESTART_PERIOD
-                save_config
-                ;;
-            9)
-                clear
-                echo "---- NHẬT KÝ HOẠT ĐỘNG (Bấm q để thoát xem) ----"
-                tail -n 50 "$LOG_FILE" 2>/dev/null || echo "Chưa có log phát sinh."
-                echo "Nhấn Enter để tiếp tục..."
-                read
-                ;;
-            10)
                 exit 0
                 ;;
             *)
