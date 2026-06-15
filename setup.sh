@@ -30,14 +30,11 @@ pkg update -y && pkg upgrade -y -o Dpkg::Options::="--force-confold"
 echo -e "[*] Đang cài đặt các công cụ cần thiết (tmux, curl, tsu, procps, android-tools)..."
 pkg install tmux curl tsu procps android-tools -y
 
-# Đảm bảo file auto_rejoin.sh có sẵn và có quyền chạy
-if [ -f "auto_rejoin.sh" ]; then
-    chmod +x auto_rejoin.sh
-else
-    echo -e "[*] Đang tải file script auto_rejoin.sh từ GitHub..."
-    curl -o auto_rejoin.sh -L "https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh" 2>/dev/null
-    chmod +x auto_rejoin.sh
-fi
+# Tải hoặc cập nhật bản mới nhất của file script auto_rejoin.sh từ GitHub
+echo -e "[*] Đang tải/cập nhật file script auto_rejoin.sh..."
+rm -f auto_rejoin.sh
+curl -o auto_rejoin.sh -L "https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh" 2>/dev/null
+chmod +x auto_rejoin.sh
 
 # Phát hiện phương thức thực thi lệnh (Root hoặc ADB)
 detect_system_executor() {
@@ -75,9 +72,6 @@ fi
 # Dọn dẹp phiên tmux cũ nếu có
 tmux kill-session -t roblox-multi 2>/dev/null
 
-# Khởi tạo phiên tmux chạy ngầm
-tmux new-session -d -s roblox-multi -n "main"
-
 count=1
 for pkg in $packages; do
     cfg_file="config_${pkg}.cfg"
@@ -102,9 +96,11 @@ EOF
 
     # Đưa lệnh chạy bot vào các window riêng trong tmux
     if [ $count -eq 1 ]; then
-        tmux rename-window -t roblox-multi:1 "$window_name"
-        tmux send-keys -t roblox-multi:1 "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
+        # Khởi tạo tmux session mới với window đầu tiên đặt theo tên package
+        tmux new-session -d -s roblox-multi -n "$window_name"
+        tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
     else
+        # Tạo thêm window mới cho các package tiếp theo
         tmux new-window -t roblox-multi -n "$window_name"
         tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
     fi
