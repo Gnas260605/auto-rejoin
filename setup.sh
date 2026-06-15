@@ -98,11 +98,11 @@ EOF
     if [ $count -eq 1 ]; then
         # Khởi tạo tmux session mới với window đầu tiên đặt theo tên package
         tmux new-session -d -s roblox-multi -n "$window_name"
-        tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
+        tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh --run" C-m
     else
         # Tạo thêm window mới cho các package tiếp theo
         tmux new-window -t roblox-multi -n "$window_name"
-        tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
+        tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh --run" C-m
     fi
     
     echo -e "${GREEN}[+] Đang chạy ngầm tài khoản cho: $pkg${NC}"

@@ -359,6 +359,10 @@ menu() {
     done
 }
 
-# Chạy menu chính
-menu
+# Kiểm tra đối số chạy trực tiếp không qua menu (chế độ chạy ngầm)
+if [ "$1" = "--run" ]; then
+    start_bot
+else
+    menu
+fi
 
