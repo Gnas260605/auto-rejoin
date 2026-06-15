@@ -123,14 +123,19 @@ check_internet() {
     fi
 }
 
-# Kiểm tra xem Roblox có đang hoạt động ở màn hình trước không
-is_roblox_in_foreground() {
-    local focus_info
-    focus_info=$(run_cmd "dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp'")
-    if echo "$focus_info" | grep -q "$ROBLOX_PACKAGE"; then
-        return 0
+# Kiểm tra xem tiến trình Roblox có đang chạy (tiền cảnh hoặc chạy ngầm) hay không
+is_roblox_running() {
+    local ps_info
+    ps_info=$(run_cmd "ps -A")
+    # Nếu không hỗ trợ ps -A, thử ps thường
+    if [ -z "$ps_info" ]; then
+        ps_info=$(run_cmd "ps")
+    fi
+    
+    if echo "$ps_info" | grep -q "$ROBLOX_PACKAGE"; then
+        return 0 # Roblox vẫn đang chạy
     else
-        return 1
+        return 1 # Roblox đã bị tắt hoàn toàn
     fi
 }
 
@@ -174,8 +179,8 @@ start_bot() {
         fi
 
         # 1. Kiểm tra sự cố crash hoặc tắt app
-        if ! is_roblox_in_foreground; then
-            log_msg "${RED}[!] Cảnh báo: Phát hiện Roblox ($ROBLOX_PACKAGE) bị crash hoặc tắt ngầm!${NC}"
+        if ! is_roblox_running; then
+            log_msg "${RED}[!] Cảnh báo: Phát hiện Roblox ($ROBLOX_PACKAGE) đã bị tắt hoặc crash!${NC}"
             send_discord "⚠️ **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Phát hiện game bị crash/tắt! Đang khởi động lại..."
             run_cmd "am force-stop $ROBLOX_PACKAGE"
             sleep 3
