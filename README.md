@@ -4,18 +4,18 @@ Công cụ này giúp bạn tự động kết nối lại (Auto Rejoin) khi gam
 
 ---
 
-## ⚡ Lệnh Cài Đặt Nhanh (Một click)
-
-Mở **Termux** trên điện thoại đám mây và dán dòng lệnh sau để cài đặt toàn bộ công cụ và chạy:
+Mở **Termux** trên điện thoại đám mây và chạy dòng lệnh sau (Thay thế `2753915549` bằng Place ID của bạn):
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/your-username/ToolAutoRoblox/main/setup.sh -o setup.sh && bash setup.sh
+curl -sSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh && bash setup.sh 2753915549
 ```
 
-*(Nếu bạn đã tải dự án này về máy hoặc có sẵn file `setup.sh` trong thư mục, chỉ cần chạy lệnh sau để thiết lập nhanh:)*
+*Nếu bạn sử dụng **Server riêng (Private Server)**, hãy truyền thêm mã Share Code ở phía sau. Ví dụ:*
 ```bash
-chmod +x setup.sh && ./setup.sh
+curl -sSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh && bash setup.sh 2753915549 abc123xyz
 ```
+
+*(Nếu bạn đã tải file `setup.sh` về máy, bạn có thể chạy trực tiếp bằng lệnh: `chmod +x setup.sh && ./setup.sh <PLACE_ID> [PRIVATE_CODE]`)*
 
 ---
 

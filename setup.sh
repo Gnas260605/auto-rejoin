@@ -10,44 +10,110 @@ NC='\033[0;m' # No Color
 
 clear
 echo -e "${CYAN}====================================================${NC}"
-echo -e "${GREEN}    TRÌNH CÀI ĐẶT NHANH ROBLOX AUTO REJOIN BOT       ${NC}"
+echo -e "${GREEN}    TRÌNH CÀI ĐẶT TỰ ĐỘNG ROBLOX MULTI-CLONE BOT     ${NC}"
 echo -e "${CYAN}====================================================${NC}"
+
+# Nhận đối số từ dòng lệnh (Place ID và Private Code)
+PLACE_ID="${1:-2753915549}" # Mặc định là Blox Fruits nếu không nhập
+PRIVATE_CODE="$2"            # Không nhập thì mặc định chơi server thường
+
+echo -e "[*] Place ID được thiết lập: ${YELLOW}$PLACE_ID${NC}"
+if [ -n "$PRIVATE_CODE" ]; then
+    echo -e "[*] Mã Server riêng được thiết lập: ${YELLOW}$PRIVATE_CODE${NC}"
+else
+    echo -e "[*] Chế độ: ${YELLOW}Server thường (Public)${NC}"
+fi
+
 echo -e "[*] Đang cập nhật gói hệ thống Termux..."
 pkg update -y && pkg upgrade -y -o Dpkg::Options::="--force-confold"
 
-echo -e "[*] Đang cài đặt các công cụ cần thiết (tmux, curl, tsu, procps)..."
-pkg install tmux curl tsu procps -y
+echo -e "[*] Đang cài đặt các công cụ cần thiết (tmux, curl, tsu, procps, android-tools)..."
+pkg install tmux curl tsu procps android-tools -y
 
-# Kiểm tra quyền thực thi lệnh trên điện thoại Cloud Phone
-echo -e "[*] Đang kiểm tra môi trường hệ thống..."
-if command -v su >/dev/null 2>&1 && su -c "id" >/dev/null 2>&1; then
-    echo -e "${GREEN}[+] Thiết bị đã được ROOT! Tool sẽ hoạt động hoàn hảo.${NC}"
-else
-    echo -e "${YELLOW}[!] Thiết bị chưa ROOT hoặc chưa cấp quyền ROOT cho Termux.${NC}"
-    echo -e "[*] Đang cài đặt bộ công cụ android-tools phòng trường hợp dùng kết nối ADB không dây..."
-    pkg install android-tools -y
-    echo -e "${CYAN}[ℹ] Lưu ý: Nếu không có Root, bạn cần bật Gỡ lỗi không dây và gõ 'adb connect localhost:5555' trước khi chạy tool.${NC}"
-fi
-
-# Tải hoặc cấu hình quyền cho file chạy chính
+# Đảm bảo file auto_rejoin.sh có sẵn và có quyền chạy
 if [ -f "auto_rejoin.sh" ]; then
     chmod +x auto_rejoin.sh
-    echo -e "${GREEN}[+] Đã cấp quyền chạy cho auto_rejoin.sh${NC}"
 else
-    echo -e "[*] Đang tải file script auto_rejoin.sh về máy..."
-    # Trong trường hợp họ chạy trực tiếp qua lệnh internet curl setup.sh, ta sẽ tải auto_rejoin.sh về
-    curl -o auto_rejoin.sh -L "https://raw.githubusercontent.com/username/ToolAutoRoblox/main/auto_rejoin.sh" 2>/dev/null || echo -e "${RED}[!] Không thể tải online. Hãy đảm bảo file auto_rejoin.sh có sẵn trong thư mục hiện tại.${NC}"
+    echo -e "[*] Đang tải file script auto_rejoin.sh từ GitHub..."
+    curl -o auto_rejoin.sh -L "https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh" 2>/dev/null
     chmod +x auto_rejoin.sh
 fi
 
-echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}          CÀI ĐẶT THÀNH CÔNG VÀ SẴN SÀNG!            ${NC}"
-echo -e "${GREEN}====================================================${NC}"
-echo -e "Để khởi chạy hệ thống quản lý, bạn chỉ cần gõ lệnh:"
-echo -e "👉 ${YELLOW}./auto_rejoin.sh${NC}"
-echo -e ""
-echo -n "Bạn có muốn khởi động menu điều khiển ngay bây giờ không? (y/n): "
-read run_now
-if [ "$run_now" = "y" ] || [ "$run_now" = "Y" ]; then
-    ./auto_rejoin.sh
+# Phát hiện phương thức thực thi lệnh (Root hoặc ADB)
+detect_system_executor() {
+    if command -v su >/dev/null 2>&1 && su -c "id" >/dev/null 2>&1; then
+        echo "su -c"
+    elif command -v adb >/dev/null 2>&1 && adb shell "id" >/dev/null 2>&1; then
+        echo "adb shell"
+    else
+        echo "direct"
+    fi
+}
+SYS_EXECUTOR=$(detect_system_executor)
+echo -e "[*] Phương thức hệ thống: ${YELLOW}$SYS_EXECUTOR${NC}"
+
+# Quét tất cả các bản Roblox clone đã được cài đặt trên thiết bị
+echo -e "[*] Đang quét các phiên bản Roblox đã cài đặt..."
+packages=""
+if [ "$SYS_EXECUTOR" = "su -c" ]; then
+    packages=$(su -c "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d ':' -f 2 | tr -d '\r')
+elif [ "$SYS_EXECUTOR" = "adb shell" ]; then
+    packages=$(adb shell "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d ':' -f 2 | tr -d '\r')
+else
+    packages=$(pm list packages 2>/dev/null | grep -i "roblox" | cut -d ':' -f 2 | tr -d '\r')
 fi
+
+# Nếu không quét được, sử dụng gói mặc định của Roblox
+if [ -z "$packages" ]; then
+    echo -e "${YELLOW}[!] Không tìm thấy bản clone nào đang mở hoặc chưa cấp quyền. Sử dụng gói mặc định com.roblox.client${NC}"
+    packages="com.roblox.client"
+else
+    echo -e "${GREEN}[+] Đã tìm thấy các gói Roblox sau:${NC}"
+    echo "$packages"
+fi
+
+# Dọn dẹp phiên tmux cũ nếu có
+tmux kill-session -t roblox-multi 2>/dev/null
+
+# Khởi tạo phiên tmux chạy ngầm
+tmux new-session -d -s roblox-multi -n "main"
+
+count=1
+for pkg in $packages; do
+    cfg_file="config_${pkg}.cfg"
+    log_file="roblox_${pkg}.log"
+    
+    # Tạo file cấu hình riêng cho từng package
+    cat <<EOF > "$cfg_file"
+PLACE_ID="$PLACE_ID"
+PRIVATE_CODE="$PRIVATE_CODE"
+ROBLOX_PACKAGE="$pkg"
+CHECK_INTERVAL=30
+AUTO_RESTART_PERIOD=7200
+ANTI_AFK=true
+AFK_TAP_INTERVAL=180
+TAP_X=500
+TAP_Y=500
+DISCORD_WEBHOOK=""
+EOF
+
+    # Đưa lệnh chạy bot vào các window riêng trong tmux
+    if [ $count -eq 1 ]; then
+        tmux rename-window -t roblox-multi:1 "$pkg"
+        tmux send-keys -t roblox-multi:1 "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
+    else
+        tmux new-window -t roblox-multi -n "$pkg"
+        tmux send-keys -t roblox-multi:"$pkg" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
+    fi
+    
+    echo -e "${GREEN}[+] Đang chạy ngầm tài khoản cho: $pkg${NC}"
+    count=$((count + 1))
+done
+
+echo -e "${GREEN}====================================================${NC}"
+echo -e "${GREEN}         TỰ ĐỘNG THIẾT LẬP VÀ KHỞI CHẠY THÀNH CÔNG!  ${NC}"
+echo -e "${GREEN}====================================================${NC}"
+echo -e "Tất cả các bản Roblox clone đang được giám sát ngầm."
+echo -e "👉 Để xem giao diện theo dõi, hãy gõ lệnh: ${YELLOW}tmux a${NC}"
+echo -e "👉 Để thoát giao diện theo dõi mà vẫn chạy ngầm: Nhấn ${YELLOW}Ctrl + B${NC} rồi bấm tiếp ${YELLOW}D${NC}"
+echo -e "${GREEN}====================================================${NC}"
