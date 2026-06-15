@@ -113,6 +113,16 @@ launch_roblox() {
     LAST_AFK_TAP=$(date +%s)
 }
 
+# Kiểm tra xem thiết bị có kết nối Internet không
+check_internet() {
+    # Thử ping tới Cloudflare DNS trong 2 giây
+    if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+        return 0 # Có mạng
+    else
+        return 1 # Mất mạng
+    fi
+}
+
 # Kiểm tra xem Roblox có đang hoạt động ở màn hình trước không
 is_roblox_in_foreground() {
     local focus_info
@@ -146,6 +156,23 @@ start_bot() {
     while true; do
         sleep $CHECK_INTERVAL
         
+        # 0. Kiểm tra kết nối mạng (Tránh spam mở game khi mất mạng)
+        if ! check_internet; then
+            log_msg "${RED}[!] Phát hiện mất kết nối Internet! Đang tạm dừng kiểm tra và chờ mạng...${NC}"
+            send_discord "⚠️ **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Thiết bị mất kết nối mạng! Tạm dừng chờ mạng hồi phục..."
+            
+            while ! check_internet; do
+                sleep 10
+            done
+            
+            log_msg "${GREEN}[+] Đã có mạng trở lại! Tiến hành dọn dẹp và khởi động lại game...${NC}"
+            send_discord "📶 **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Đã kết nối lại Internet! Đang vào lại game..."
+            run_cmd "am force-stop $ROBLOX_PACKAGE"
+            sleep 3
+            launch_roblox
+            continue
+        fi
+
         # 1. Kiểm tra sự cố crash hoặc tắt app
         if ! is_roblox_in_foreground; then
             log_msg "${RED}[!] Cảnh báo: Phát hiện Roblox ($ROBLOX_PACKAGE) bị crash hoặc tắt ngầm!${NC}"
