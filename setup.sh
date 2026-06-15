@@ -83,6 +83,9 @@ for pkg in $packages; do
     cfg_file="config_${pkg}.cfg"
     log_file="roblox_${pkg}.log"
     
+    # Thay thế dấu chấm bằng dấu gạch dưới để tránh lỗi phân tách window.pane của tmux
+    window_name="${pkg//./_}"
+    
     # Tạo file cấu hình riêng cho từng package
     cat <<EOF > "$cfg_file"
 PLACE_ID="$PLACE_ID"
@@ -99,11 +102,11 @@ EOF
 
     # Đưa lệnh chạy bot vào các window riêng trong tmux
     if [ $count -eq 1 ]; then
-        tmux rename-window -t roblox-multi:1 "$pkg"
+        tmux rename-window -t roblox-multi:1 "$window_name"
         tmux send-keys -t roblox-multi:1 "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
     else
-        tmux new-window -t roblox-multi -n "$pkg"
-        tmux send-keys -t roblox-multi:"$pkg" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
+        tmux new-window -t roblox-multi -n "$window_name"
+        tmux send-keys -t roblox-multi:"$window_name" "CONFIG_FILE=\"$cfg_file\" LOG_FILE=\"$log_file\" ./auto_rejoin.sh" C-m
     fi
     
     echo -e "${GREEN}[+] Đang chạy ngầm tài khoản cho: $pkg${NC}"
