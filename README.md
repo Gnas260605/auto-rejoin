@@ -9,7 +9,7 @@ Công cụ này giúp bạn tự động kết nối lại (Auto Rejoin) khi gam
 Mở **Termux** trên điện thoại đám mây và dán dòng lệnh sau để cài đặt toàn bộ công cụ và chạy:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh && bash setup.sh
+curl -sSL https://raw.githubusercontent.com/your-username/ToolAutoRoblox/main/setup.sh -o setup.sh && bash setup.sh
 ```
 
 *(Nếu bạn đã tải dự án này về máy hoặc có sẵn file `setup.sh` trong thư mục, chỉ cần chạy lệnh sau để thiết lập nhanh:)*
