@@ -36,7 +36,7 @@ if [ -f "auto_rejoin.sh" ]; then
 else
     echo -e "[*] Đang tải file script auto_rejoin.sh về máy..."
     # Trong trường hợp họ chạy trực tiếp qua lệnh internet curl setup.sh, ta sẽ tải auto_rejoin.sh về
-    curl -o auto_rejoin.sh -L "https://raw.githubusercontent.com/username/ToolAutoRoblox/main/auto_rejoin.sh" 2>/dev/null || echo -e "${RED}[!] Không thể tải online. Hãy đảm bảo file auto_rejoin.sh có sẵn trong thư mục hiện tại.${NC}"
+    curl -o auto_rejoin.sh -L "https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh" 2>/dev/null || echo -e "${RED}[!] Không thể tải online. Hãy đảm bảo file auto_rejoin.sh có sẵn trong thư mục hiện tại.${NC}"
     chmod +x auto_rejoin.sh
 fi
 
