@@ -188,6 +188,25 @@ for PKG in $PACKAGES; do
 done
 echo ""
 
+# Đọc cấu hình mặc định từ config.cfg nếu có để làm giá trị fallback
+DEFAULT_WEBHOOK=""
+DEFAULT_CHECK_INTERVAL=30
+DEFAULT_AUTO_RESTART=7200
+DEFAULT_ANTI_AFK=true
+DEFAULT_TAP_INTERVAL=180
+DEFAULT_TAP_X=540
+DEFAULT_TAP_Y=960
+
+if [ -f "config.cfg" ]; then
+    DEFAULT_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' config.cfg | cut -d'"' -f2 2>/dev/null)
+    DEFAULT_CHECK_INTERVAL=$(grep '^CHECK_INTERVAL=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_AUTO_RESTART=$(grep '^AUTO_RESTART_PERIOD=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_ANTI_AFK=$(grep '^ANTI_AFK=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_TAP_INTERVAL=$(grep '^AFK_TAP_INTERVAL=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_TAP_X=$(grep '^TAP_X=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_TAP_Y=$(grep '^TAP_Y=' config.cfg | cut -d'=' -f2 2>/dev/null)
+fi
+
 echo -e "${BGRN}+------------------------------------------------------+${NC}"
 echo -e "${BGRN}|       KHOI DONG BOT CHO TUNG TAI KHOAN               |${NC}"
 echo -e "${BGRN}+------------------------------------------------------+${NC}"
@@ -198,17 +217,45 @@ for PKG in $PACKAGES; do
     WIN="${PKG//./_}"
     SAVED_USERNAME="${USERNAME_MAP[$PKG]:-}"
 
+    # Đọc và giữ lại cấu hình cũ của account này nếu đã tồn tại
+    EXISTING_WEBHOOK=""
+    EXISTING_CHECK_INTERVAL=""
+    EXISTING_AUTO_RESTART=""
+    EXISTING_ANTI_AFK=""
+    EXISTING_TAP_INTERVAL=""
+    EXISTING_TAP_X=""
+    EXISTING_TAP_Y=""
+
+    if [ -f "$CFG" ]; then
+        EXISTING_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' "$CFG" | cut -d'"' -f2 2>/dev/null)
+        EXISTING_CHECK_INTERVAL=$(grep '^CHECK_INTERVAL=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_AUTO_RESTART=$(grep '^AUTO_RESTART_PERIOD=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_ANTI_AFK=$(grep '^ANTI_AFK=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_TAP_INTERVAL=$(grep '^AFK_TAP_INTERVAL=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_TAP_X=$(grep '^TAP_X=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_TAP_Y=$(grep '^TAP_Y=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+    fi
+
+    # Lấy giá trị hiện tại (ưu tiên của account -> mặc định chung -> mặc định mặc định)
+    DISCORD_WEBHOOK="${EXISTING_WEBHOOK:-$DEFAULT_WEBHOOK}"
+    CHECK_INTERVAL="${EXISTING_CHECK_INTERVAL:-${DEFAULT_CHECK_INTERVAL:-30}}"
+    AUTO_RESTART_PERIOD="${EXISTING_AUTO_RESTART:-${DEFAULT_AUTO_RESTART:-7200}}"
+    ANTI_AFK="${EXISTING_ANTI_AFK:-${DEFAULT_ANTI_AFK:-true}}"
+    AFK_TAP_INTERVAL="${EXISTING_TAP_INTERVAL:-${DEFAULT_TAP_INTERVAL:-180}}"
+    TAP_X="${EXISTING_TAP_X:-${DEFAULT_TAP_X:-540}}"
+    TAP_Y="${EXISTING_TAP_Y:-${DEFAULT_TAP_Y:-960}}"
+
     cat > "$CFG" <<EOF
 PLACE_ID="$PLACE_ID"
 PRIVATE_CODE="$PRIVATE_CODE"
 ROBLOX_PACKAGE="$PKG"
-CHECK_INTERVAL=30
-AUTO_RESTART_PERIOD=7200
-ANTI_AFK=true
-AFK_TAP_INTERVAL=180
-TAP_X=540
-TAP_Y=960
-DISCORD_WEBHOOK=""
+CHECK_INTERVAL=$CHECK_INTERVAL
+AUTO_RESTART_PERIOD=$AUTO_RESTART_PERIOD
+ANTI_AFK=$ANTI_AFK
+AFK_TAP_INTERVAL=$AFK_TAP_INTERVAL
+TAP_X=$TAP_X
+TAP_Y=$TAP_Y
+DISCORD_WEBHOOK="$DISCORD_WEBHOOK"
 ROBLOX_USERNAME="${SAVED_USERNAME}"
 EOF
 
@@ -219,8 +266,10 @@ EOF
     else
         tmux new-window -t roblox-multi -n "$WIN" 2>/dev/null
     fi
-    tmux send-keys -t "roblox-multi:${WIN}" \
-        "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats.dat\" bash auto_rejoin.sh --run" C-m 2>/dev/null
+    tmux set-window-option -t "roblox-multi:${WIN}" automatic-rename off 2>/dev/null
+    tmux set-window-option -t "roblox-multi:${WIN}" remain-on-exit on 2>/dev/null
+    tmux respawn-pane -k -t "roblox-multi:${WIN}" -c "$PWD" \
+        "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
 
     UNAME_DISPLAY="${SAVED_USERNAME:-N/A}"
     printf "${BGRN}|${NC}  ${BGRN}*${NC} Acc ${YLW}%2d${NC}: ${CYN}%-28s${NC} ${GRN}%-12s${NC}${BGRN}|${NC}\n" \
@@ -258,17 +307,39 @@ cat > /tmp/watchdog_roblox.sh << 'WDEOF'
 #!/bin/bash
 BGRN='\033[1;32m'; GRN='\033[0;32m'; RED='\033[0;31m'; YLW='\033[0;33m'; CYN='\033[0;36m'; NC='\033[0m'
 ALL_CFGS="$1"   # Danh sách "cfg:pkg:log" cách nhau bằng space
+EXECUTOR="$2"   # Kiểu thực thi (su, adb, direct)
+PROJECT_DIR="$3" # Thư mục dự án
+
+run_cmd() {
+    case "$EXECUTOR" in
+        su)     su -c "$1" ;;
+        adb)    adb shell "$1" ;;
+        *)      eval "$1" ;;
+    esac
+}
 
 echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║       WATCHDOG - GIÁM SÁT TẤT CẢ BOT        ║${NC}"
-echo -e "${BGRN}║   Kiểm tra mỗi 30s, tự restart bot chết     ║${NC}"
+echo -e "${BGRN}║   Kiểm tra mỗi 15s, tự restart bot chết     ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
 while true; do
     TS=$(date '+%H:%M:%S')
-    echo -e "${CYN}[$TS]${NC} Đang kiểm tra ${YLW}$(echo $ALL_CFGS | wc -w)${NC} bot..."
+    echo -e "${CYN}[$TS]${NC} Đang cập nhật status cache & kiểm tra ${YLW}$(echo $ALL_CFGS | wc -w)${NC} bot..."
 
+    # 1. Cập nhật dumpsys dùng chung cho các bot (giảm tải tối đa cho CPU)
+    run_cmd "dumpsys activity activities" > /tmp/roblox_activities.tmp 2>/dev/null
+    if [ -s /tmp/roblox_activities.tmp ]; then
+        mv /tmp/roblox_activities.tmp /tmp/roblox_activities.txt
+    fi
+
+    run_cmd "dumpsys window windows" > /tmp/roblox_windows.tmp 2>/dev/null
+    if [ -s /tmp/roblox_windows.tmp ]; then
+        mv /tmp/roblox_windows.tmp /tmp/roblox_windows.txt
+    fi
+
+    # 2. Kiểm tra sống chết của từng bot
     for ENTRY in $ALL_CFGS; do
         CFG=$(echo "$ENTRY" | cut -d: -f1)
         PKG=$(echo "$ENTRY" | cut -d: -f2)
@@ -279,36 +350,38 @@ while true; do
         # Dấu hiệu: pane của window không có tiến trình bash/auto_rejoin
         WIN_PANE=$(tmux list-panes -t "roblox-multi:${WIN}" -F "#{pane_current_command}" 2>/dev/null)
 
-        if [ -z "$WIN_PANE" ] || [ "$WIN_PANE" = "bash" ] && ! tmux list-panes -t "roblox-multi:${WIN}" -F "#{pane_pid}" 2>/dev/null | xargs ps -p > /dev/null 2>&1; then
-            # Window không tồn tại → tạo lại
-            echo -e "  ${RED}[WATCHDOG]${NC} Window '${WIN}' đã chết! Đang khởi động lại..."
-            tmux new-window -t roblox-multi -n "$WIN" 2>/dev/null
-            tmux send-keys -t "roblox-multi:${WIN}" \
-                "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats.dat\" bash auto_rejoin.sh --run" C-m 2>/dev/null
+        bot_running=false
+        if [ -n "$WIN_PANE" ]; then
+            pid=""
+            [ -f "/tmp/roblox_bot_${WIN}.pid" ] && pid=$(cat "/tmp/roblox_bot_${WIN}.pid" 2>/dev/null)
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                bot_running=true
+            fi
+        fi
+
+        if [ "$bot_running" = "false" ]; then
+            echo -e "  ${RED}[WATCHDOG]${NC} Bot '${WIN}' không chạy! Đang khởi động lại..."
+            if [ -z "$WIN_PANE" ]; then
+                tmux new-window -t roblox-multi -n "$WIN" 2>/dev/null
+                tmux set-window-option -t "roblox-multi:${WIN}" automatic-rename off 2>/dev/null
+                tmux set-window-option -t "roblox-multi:${WIN}" remain-on-exit on 2>/dev/null
+            fi
+            tmux respawn-pane -k -t "roblox-multi:${WIN}" -c "$PROJECT_DIR" \
+                "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
             echo -e "  ${GRN}[WATCHDOG]${NC} Đã restart bot cho: ${CYN}$PKG${NC}"
         else
-            # Kiểm tra pane có còn chạy script không (không phải shell rảnh)
-            PANE_CMD=$(tmux list-panes -t "roblox-multi:${WIN}" -F "#{pane_current_command}" 2>/dev/null | head -1)
-            if [ "$PANE_CMD" = "bash" ] || [ -z "$PANE_CMD" ]; then
-                # Pane có shell nhưng script đã thoát → restart
-                echo -e "  ${YLW}[WATCHDOG]${NC} Bot '${WIN}' đã thoát. Đang restart..."
-                tmux send-keys -t "roblox-multi:${WIN}" \
-                    "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats.dat\" bash auto_rejoin.sh --run" C-m 2>/dev/null
-                echo -e "  ${GRN}[WATCHDOG]${NC} Đã restart: ${CYN}$PKG${NC}"
-            else
-                echo -e "  ${GRN}  ✓${NC} $PKG → ${GRN}OK${NC}"
-            fi
+            echo -e "  ${GRN}  ✓${NC} $PKG → ${GRN}OK${NC}"
         fi
     done
 
     echo ""
-    sleep 30
+    sleep 15
 done
 WDEOF
 chmod +x /tmp/watchdog_roblox.sh
 
 tmux send-keys -t "roblox-multi:WATCHDOG" \
-    "bash /tmp/watchdog_roblox.sh '${ALL_CFGS_LINE}'" C-m 2>/dev/null
+    "bash /tmp/watchdog_roblox.sh '${ALL_CFGS_LINE}' '${EXECUTOR_TYPE}' '${PWD}'" C-m 2>/dev/null
 
 printf "${BGRN}║${NC}  ${BGRN}✓${NC} ${YLW}WATCHDOG${NC}: Giám sát toàn bộ ${YLW}$((COUNT-1))${NC} acc          ${BGRN}║${NC}\n"
 
@@ -330,8 +403,10 @@ echo -e "${BGRN}║${NC}  ${WHT}Thoát tmux:${NC}    ${YLW}Ctrl+B rồi D${NC}  
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 
-echo -ne "${WHT}Mở Menu điều khiển ngay? (y/N): ${NC}"
-read -r run_now
-if [ "$run_now" = "y" ] || [ "$run_now" = "Y" ]; then
-    bash auto_rejoin.sh
+if [ "$AUTO_REJOIN_PARENT" != "true" ]; then
+    echo -ne "${WHT}Mở Menu điều khiển ngay? (y/N): ${NC}"
+    read -r run_now
+    if [ "$run_now" = "y" ] || [ "$run_now" = "Y" ]; then
+        bash auto_rejoin.sh
+    fi
 fi

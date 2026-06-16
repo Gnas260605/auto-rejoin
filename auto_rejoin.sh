@@ -14,6 +14,10 @@ LAST_RESTART=0
 LAST_AFK_TAP=0
 LAST_LAUNCH=0
 LAUNCH_GRACE=60   # Giây chờ sau khi mở game trước khi kiểm tra crash
+LAST_IN_GAME=0
+IN_GAME_TIMEOUT=120
+LOBBY_RETRY_COUNT=0
+TAP_ON_LOAD_DONE=false
 
 # ── Màu sắc ─────────────────────────────────────────────
 BLK='\033[0;30m'
@@ -52,23 +56,23 @@ send_discord() {
 # ── Thống kê rejoin ──────────────────────────────────────
 inc_rejoin_count() {
     local pkg="${1:-$ROBLOX_PACKAGE}"
-    local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
+    local stats_file="roblox_stats_${pkg}.dat"
     local count=0
-    [ -f "$STATS_FILE" ] && count=$(grep "^${key}=" "$STATS_FILE" 2>/dev/null | cut -d= -f2)
+    [ -f "$stats_file" ] && count=$(cat "$stats_file" 2>/dev/null)
     count=$(( ${count:-0} + 1 ))
-    if [ -f "$STATS_FILE" ] && grep -q "^${key}=" "$STATS_FILE" 2>/dev/null; then
-        # key đã tồn tại → cập nhật
-        sed -i "s/^${key}=.*/${key}=${count}/" "$STATS_FILE" 2>/dev/null
-    else
-        # key chưa có → thêm mới
-        echo "${key}=${count}" >> "$STATS_FILE"
-    fi
+    echo "$count" > "$stats_file"
 }
 
 get_rejoin_count() {
     local pkg="${1:-$ROBLOX_PACKAGE}"
-    local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
-    [ -f "$STATS_FILE" ] && grep "^${key}=" "$STATS_FILE" 2>/dev/null | cut -d= -f2 || echo "0"
+    local stats_file="roblox_stats_${pkg}.dat"
+    if [ -f "$stats_file" ]; then
+        cat "$stats_file" 2>/dev/null
+    else
+        # Fallback đọc từ file stats cũ nếu có
+        local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
+        [ -f "roblox_stats.dat" ] && grep "^${key}=" "roblox_stats.dat" 2>/dev/null | cut -d= -f2 || echo "0"
+    fi
 }
 
 # ── Tải/Lưu cấu hình ─────────────────────────────────────
@@ -156,19 +160,18 @@ get_roblox_username() {
             fi
         fi
 
-        # Cách 3: Tìm trong tất cả file text của app
+        # Cách 3: Tìm trong các file JSON ở cấp đầu của files/ (tránh đệ quy sâu vào thư mục cache)
         if [ -z "$uname" ]; then
-            uname=$(su -c "grep -rh '\"username\"' ${data_dir}/files/ 2>/dev/null" \
+            uname=$(su -c "grep -h '\"username\"' ${data_dir}/files/*.json 2>/dev/null" \
                 | grep -oP '(?<="username":")[^"]{3,40}' \
                 | head -1 2>/dev/null)
         fi
 
-        # Cách 4: Đọc account cache JSON nếu có
+        # Cách 4: Đọc account cache JSON nếu có (chỉ tìm trong thư mục files/ với maxdepth 2)
         if [ -z "$uname" ]; then
-            uname=$(su -c "find ${data_dir} -name '*.json' -o -name '*account*' -o -name '*cache*' \
-                2>/dev/null | xargs grep -lh 'username' 2>/dev/null | head -1 \
-                | xargs grep -oh '\"username\":\"[^\"]*\"' 2>/dev/null" \
-                | grep -oP '(?<="username":")[^"]+' | head -1)
+            uname=$(su -c "find ${data_dir}/files -maxdepth 2 -name '*.json' -o -name '*account*' 2>/dev/null \
+                | xargs grep -h '\"username\"' 2>/dev/null" \
+                | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
         fi
     fi
 
@@ -232,6 +235,8 @@ launch_roblox() {
     LAST_RESTART=$(date +%s)
     LAST_AFK_TAP=$(date +%s)
     LAST_LAUNCH=$(date +%s)
+    LAST_IN_GAME=$(date +%s)
+    TAP_ON_LOAD_DONE=false
     log_msg "${GRN}[LAUNCH]${NC} Đã gửi lệnh mở game. Chờ ${LAUNCH_GRACE}s trước khi giám sát..."
 }
 
@@ -239,7 +244,8 @@ launch_roblox() {
 # ── Kiểm tra mạng ────────────────────────────────────────
 check_internet() {
     ping -c 1 -W 2 1.1.1.1 > /dev/null 2>&1 ||
-    ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1
+    ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1 ||
+    curl -s --connect-timeout 2 http://www.google.com > /dev/null 2>&1
 }
 
 # ── Kiểm tra Roblox đang chạy (đa phương thức) ───────────
@@ -248,37 +254,126 @@ check_internet() {
 is_roblox_running() {
     local pkg="$ROBLOX_PACKAGE"
 
-    # Phương thức 1: dumpsys activity (không cần root, chuẩn nhất)
+    # 1. Thử dùng file status dùng chung (nếu mới và tồn tại) để tránh gọi dumpsys trực tiếp
+    local use_shared=false
+    if [ -f "/tmp/roblox_activities.txt" ]; then
+        local mtime
+        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        local now; now=$(date +%s)
+        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
+            use_shared=true
+        fi
+    fi
+
+    if [ "$use_shared" = "true" ]; then
+        grep -q "$pkg" /tmp/roblox_activities.txt && return 0
+        if [ -f "/tmp/roblox_windows.txt" ]; then
+            grep -q "$pkg" /tmp/roblox_windows.txt && return 0
+        fi
+        # Fallback check nhanh không cần dumpsys
+        run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
+        local ps_out
+        ps_out=$(run_cmd "ps -A" 2>/dev/null)
+        [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+        echo "$ps_out" | grep -q "$pkg" && return 0
+        return 1
+    fi
+
+    # 2. Phương thức trực tiếp (pgrep nhẹ nhất check trước)
+    run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
+
     local act_out
     act_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
     if [ -n "$act_out" ]; then
         echo "$act_out" | grep -q "$pkg" && return 0
     fi
 
-    # Phương thức 2: dumpsys window (kiểm tra cửa sổ đang hiển thị)
     local win_out
     win_out=$(run_cmd "dumpsys window windows" 2>/dev/null)
     if [ -n "$win_out" ]; then
         echo "$win_out" | grep -q "$pkg" && return 0
     fi
 
-    # Phương thức 3: dumpsys package (kiểm tra process state)
     local pkg_out
     pkg_out=$(run_cmd "dumpsys package $pkg" 2>/dev/null | grep -i 'proc\|pid')
     if echo "$pkg_out" | grep -qi 'foreground\|perceptible\|visible'; then
         return 0
     fi
 
-    # Phương thức 4: ps thông thường (fallback)
     local ps_out
     ps_out=$(run_cmd "ps -A" 2>/dev/null)
     [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
     echo "$ps_out" | grep -q "$pkg" && return 0
 
-    # Phương thức 5: pgrep
-    run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
+    return 1
+}
 
-    return 1  # Không tìm thấy = game đã tắt
+# ── Kiểm tra xem Roblox đã vào gameplay map chưa (GameActivity) ──
+is_in_game() {
+    local pkg="$ROBLOX_PACKAGE"
+
+    # 1. Thử dùng file status dùng chung (nếu mới và tồn tại) để tránh gọi dumpsys trực tiếp
+    local use_shared=false
+    if [ -f "/tmp/roblox_activities.txt" ]; then
+        local mtime
+        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        local now; now=$(date +%s)
+        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
+            use_shared=true
+        fi
+    fi
+
+    if [ "$use_shared" = "true" ]; then
+        grep -i "$pkg" /tmp/roblox_activities.txt | grep -qi "GameActivity" && return 0
+        if [ -f "/tmp/roblox_windows.txt" ]; then
+            grep -i "$pkg" /tmp/roblox_windows.txt | grep -qi "GameActivity" && return 0
+        fi
+        return 1
+    fi
+
+    # 2. Phương thức trực tiếp
+    local act_out
+    act_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+    if [ -n "$act_out" ]; then
+        echo "$act_out" | grep -i "$pkg" | grep -qi "GameActivity" && return 0
+    fi
+
+    local win_out
+    win_out=$(run_cmd "dumpsys window windows" 2>/dev/null)
+    if [ -n "$win_out" ]; then
+        echo "$win_out" | grep -i "$pkg" | grep -qi "GameActivity" && return 0
+    fi
+
+    return 1
+}
+
+# ── Đọc Log Roblox phát hiện mất kết nối / bị kick ────────
+check_roblox_log_for_disconnect() {
+    local pkg="$ROBLOX_PACKAGE"
+    local log_dir=""
+
+    if run_cmd "[ -d /sdcard/Android/data/$pkg/files/logs ]" 2>/dev/null; then
+        log_dir="/sdcard/Android/data/$pkg/files/logs"
+    elif run_cmd "[ -d /data/data/$pkg/files/logs ]" 2>/dev/null; then
+        log_dir="/data/data/$pkg/files/logs"
+    fi
+
+    [ -z "$log_dir" ] && return 1
+
+    local latest_log
+    latest_log=$(run_cmd "ls -t $log_dir 2>/dev/null | head -n 1" 2>/dev/null)
+    [ -z "$latest_log" ] && return 1
+
+    local log_tail
+    log_tail=$(run_cmd "tail -n 30 $log_dir/$latest_log" 2>/dev/null)
+    [ -z "$log_tail" ] && return 1
+
+    # Tìm kiếm các từ khoá chỉ thị ngắt kết nối / bị kick ở cuối tệp tin log
+    if echo "$log_tail" | grep -qi "connection lost\|disconnect\|kick\|save data didn't load\|error code\|game closed\|lost connection"; then
+        return 0
+    fi
+
+    return 1
 }
 
 # ══════════════════════════════════════════════════════════
@@ -287,6 +382,11 @@ is_roblox_running() {
 start_bot() {
     load_config
     init_executor
+    local win_name="${ROBLOX_PACKAGE//./_}"
+    local pid_file="/tmp/roblox_bot_${win_name}.pid"
+    echo "$$" > "$pid_file"
+    trap 'rm -f "$pid_file"' EXIT INT TERM
+
     clear
     echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"
     echo -e "${BGRN}║   ROBLOX AUTO REJOIN - ĐANG CHẠY NGẦM  ║${NC}"
@@ -319,7 +419,7 @@ start_bot() {
             continue
         fi
 
-        # [1] Kiểm tra crash — Bỏ qua nếu game vừa mới được mở (grace period)
+        # [1] Kiểm tra trạng thái chạy & In-game (Chờ grace period sau khi launch)
         local NOW_CHK; NOW_CHK=$(date +%s)
         if [ $(( NOW_CHK - LAST_LAUNCH )) -lt "$LAUNCH_GRACE" ]; then
             local remaining=$(( LAUNCH_GRACE - NOW_CHK + LAST_LAUNCH ))
@@ -335,8 +435,62 @@ start_bot() {
             run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
             sleep 3
             inc_rejoin_count "$ROBLOX_PACKAGE"
+            LOBBY_RETRY_COUNT=0
             launch_roblox
             continue
+        fi
+
+        # Kiểm tra mất kết nối hoặc bị kick từ Log của Roblox
+        if check_roblox_log_for_disconnect; then
+            local cnt; cnt=$(get_rejoin_count "$ROBLOX_PACKAGE")
+            log_msg "${RED}[DISCONNECT]${NC} Phát hiện mất kết nối/kick từ log Roblox! Rejoin lần #$((cnt+1))..."
+            beep_warn
+            send_discord "🚨 **[$ROBLOX_PACKAGE]** Mất kết nối hoặc bị Kick! Đang Rejoin lần #$((cnt+1))..."
+            run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
+            sleep 3
+            inc_rejoin_count "$ROBLOX_PACKAGE"
+            LOBBY_RETRY_COUNT=0
+            launch_roblox
+            continue
+        fi
+
+        # Nếu game chạy, kiểm tra xem đã vào map chưa (GameActivity)
+        if is_in_game; then
+            LAST_IN_GAME=$NOW_CHK
+            if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
+                log_msg "${GRN}[GAME]${NC} Đã vào game thành công! Reset bộ đếm sảnh."
+                LOBBY_RETRY_COUNT=0
+            fi
+
+            # Tap kích hoạt màn hình khi game vừa tải xong lần đầu
+            if [ "$TAP_ON_LOAD_DONE" = "false" ]; then
+                log_msg "${GRN}[LOAD]${NC} Game đã tải xong! Thực hiện tap kích hoạt tại ($TAP_X, $TAP_Y)..."
+                run_cmd "input tap $TAP_X $TAP_Y" > /dev/null 2>&1
+                TAP_ON_LOAD_DONE=true
+                LAST_AFK_TAP=$NOW_CHK  # Đồng bộ thời gian tap AFK
+            fi
+        else
+            local time_stuck=$(( NOW_CHK - LAST_IN_GAME ))
+            if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
+                if [ "$LOBBY_RETRY_COUNT" -lt 3 ]; then
+                    LOBBY_RETRY_COUNT=$(( LOBBY_RETRY_COUNT + 1 ))
+                    log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh ${time_stuck}s! Gửi lại deep-link (Lần thử $LOBBY_RETRY_COUNT/3)..."
+                    send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh ${time_stuck}s. Đang gửi lại deep-link (Thử lần $LOBBY_RETRY_COUNT/3)..."
+                    launch_roblox
+                else
+                    log_msg "${RED}[LOBBY]${NC} Kẹt ở sảnh quá lâu (> 3 lần thử)! Tiến hành khởi động lại game..."
+                    send_discord "🚨 **[$ROBLOX_PACKAGE]** Kẹt ở sảnh quá lâu. Khởi động lại game!"
+                    run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
+                    sleep 3
+                    inc_rejoin_count "$ROBLOX_PACKAGE"
+                    LOBBY_RETRY_COUNT=0
+                    launch_roblox
+                fi
+                continue
+            else
+                local time_left=$(( IN_GAME_TIMEOUT - time_stuck ))
+                log_msg "${YLW}[LOBBY]${NC} Đang ở sảnh/loading, chờ vào map... (${time_left}s còn lại)"
+            fi
         fi
 
         # [2] Anti-AFK
@@ -400,9 +554,22 @@ draw_main_status() {
     local tmux_wins
     tmux_wins=$(tmux list-windows -t roblox-multi -F "#{window_name}" 2>/dev/null)
 
-    # Goi dumpsys MOT LAN duy nhat cho tat ca acc (tranh lag)
+    # Đọc kết quả dumpsys từ file status dùng chung (nếu mới và tồn tại) để tránh lag
     local dump_act=""
-    dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null < /dev/null)
+    local use_shared=false
+    if [ -f "/tmp/roblox_activities.txt" ]; then
+        local mtime
+        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        local now; now=$(date +%s)
+        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
+            use_shared=true
+        fi
+    fi
+    if [ "$use_shared" = "true" ]; then
+        dump_act=$(cat /tmp/roblox_activities.txt 2>/dev/null)
+    else
+        dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null < /dev/null)
+    fi
 
     local total_online=0 total_acc=0
 
@@ -517,7 +684,21 @@ view_clone_detail() {
     local log_file="roblox_${pkg}.log"
     local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
 
-    local ps_out; ps_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+    local ps_out=""
+    local use_shared=false
+    if [ -f "/tmp/roblox_activities.txt" ]; then
+        local mtime
+        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        local now; now=$(date +%s)
+        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
+            use_shared=true
+        fi
+    fi
+    if [ "$use_shared" = "true" ]; then
+        ps_out=$(cat /tmp/roblox_activities.txt 2>/dev/null)
+    else
+        ps_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+    fi
     local game_s="${RED}OFFLINE${NC}"
     echo "$ps_out" | grep -q "$pkg" && game_s="${BGRN}● ONLINE${NC}"
 
@@ -612,7 +793,7 @@ action_start_all() {
     echo -e "${BGRN}║          KHỞI ĐỘNG TẤT CẢ BOT               ║${NC}"
     echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
     if [ -f "./setup.sh" ]; then
-        bash ./setup.sh "$PLACE_ID" "$PRIVATE_CODE"
+        AUTO_REJOIN_PARENT=true bash ./setup.sh "$PLACE_ID" "$PRIVATE_CODE"
     else
         echo -e "${RED}[ERROR] Không tìm thấy setup.sh!${NC}"
         echo "Đảm bảo setup.sh nằm cùng thư mục với auto_rejoin.sh"
@@ -726,7 +907,7 @@ action_reset_stats() {
     echo -ne "${YLW}  Xác nhận reset thống kê rejoin? (y/N): ${NC}"
     read -r c
     if [ "$c" = "y" ] || [ "$c" = "Y" ]; then
-        rm -f "$STATS_FILE"
+        rm -f "$STATS_FILE" roblox_stats_com*.dat
         echo -e "${GRN}  ✓ Đã reset thống kê!${NC}"
         beep_ok
         sleep 1
