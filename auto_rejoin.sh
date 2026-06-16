@@ -391,23 +391,27 @@ get_all_configs() {
     echo "$cfgs"
 }
 
-# ══════════════════════════════════════════════════════════
-#  MENU: Bảng trạng thái tổng quan
-# ══════════════════════════════════════════════════════════
+# =====================================================
+#  MENU: Bang trang thai tong quan
+# =====================================================
 draw_main_status() {
     init_executor
     local cfgs; cfgs=$(get_all_configs)
     local tmux_wins
     tmux_wins=$(tmux list-windows -t roblox-multi -F "#{window_name}" 2>/dev/null)
 
+    # Goi dumpsys MOT LAN duy nhat cho tat ca acc (tranh lag)
+    local dump_act=""
+    dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null < /dev/null)
+
     local total_online=0 total_acc=0
 
-    echo -e "${BGRN}╔═══╦═══════════════════════════╦═══════════╦═══════════╦══════════╦══════════╗${NC}"
-    echo -e "${BGRN}║${NC} # ${BGRN}║${NC} Package Name               ${BGRN}║${NC} USERNAME  ${BGRN}║${NC} GAME      ${BGRN}║${NC} BOT      ${BGRN}║${NC} REJOIN   ${BGRN}║${NC}"
-    echo -e "${BGRN}╠═══╬═══════════════════════════╬═══════════╬═══════════╬══════════╬══════════╣${NC}"
+    echo -e "${BGRN}+---+---------------------------+-----------+-----------+----------+----------+${NC}"
+    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name               ${BGRN}|${NC} USERNAME  ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
+    echo -e "${BGRN}+---+---------------------------+-----------+-----------+----------+----------+${NC}"
 
     if [ -z "$cfgs" ]; then
-        echo -e "${BGRN}║${NC}  ${RED}Chưa có acc nào! Chạy [1] Setup trước.${NC}                                 ${BGRN}║${NC}"
+        echo -e "${BGRN}|${NC}  ${RED}Chua co acc nao! Chay [1] Setup truoc.${NC}                              ${BGRN}|${NC}"
     else
         local idx=1
         for cfg in $cfgs; do
@@ -416,42 +420,42 @@ draw_main_status() {
             [ -z "$pkg" ] && continue
             total_acc=$((total_acc+1))
 
-            # Username từ config
+            # Username tu config
             local uname; uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
             uname="${uname:0:10}"
             uname="${uname:-N/A}"
 
-            # Trạng thái game: dùng dumpsys (không cần root)
+            # Trang thai game: dung ket qua dumpsys da lay 1 lan o tren
             local game_s="${RED}OFFLINE   ${NC}"
-            local dump_act; dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null)
             if echo "$dump_act" | grep -q "$pkg"; then
-                game_s="${BGRN}● ONLINE  ${NC}"
+                game_s="${BGRN}* ONLINE  ${NC}"
                 total_online=$((total_online+1))
             fi
 
-            # Trạng thái bot tmux
+            # Trang thai bot tmux
             local win_name="${pkg//./_}"
             local bot_s="${RED}STOPPED ${NC}"
             echo "$tmux_wins" | grep -q "^${win_name}$" && bot_s="${GRN}RUNNING ${NC}"
 
-            # Số lần rejoin
+            # So lan rejoin
             local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
 
             local short_pkg="${pkg:0:27}"
 
-            printf "${BGRN}║${NC} %-2s${BGRN}║${NC} %-27s ${BGRN}║${NC} %-9s ${BGRN}║${NC} " \
+            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-27s ${BGRN}|${NC} %-9s ${BGRN}|${NC} " \
                 "$idx" "$short_pkg" "$uname"
             echo -en "$game_s"
-            printf "${BGRN}║${NC} "
+            printf "${BGRN}|${NC} "
             echo -en "$bot_s"
-            printf "${BGRN}║${NC} %-8s ${BGRN}║${NC}\n" "$rj_cnt lần"
+            printf "${BGRN}|${NC} %-8s ${BGRN}|${NC}\n" "$rj_cnt lan"
             idx=$((idx+1))
         done
     fi
 
-    echo -e "${BGRN}╚═══╩═══════════════════════════╩═══════════╩═══════════╩══════════╩══════════╝${NC}"
-    echo -e " ${GRN}Tổng:${NC} ${BGRN}$total_online${NC}/${total_acc} acc ONLINE"
+    echo -e "${BGRN}+---+---------------------------+-----------+-----------+----------+----------+${NC}"
+    echo -e " ${GRN}Tong:${NC} ${BGRN}$total_online${NC}/${total_acc} acc ONLINE"
 }
+
 
 # ══════════════════════════════════════════════════════════
 #  MENU: Header
@@ -576,31 +580,30 @@ view_clone_detail() {
 show_menu() {
     load_config
     init_executor
-    # Tự động quét username ngầm (nhanh, không block UI)
-    scan_all_usernames > /dev/null 2>&1 &
     clear
     draw_header
     echo ""
     draw_main_status
     echo ""
-    echo -e "${BGRN}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BGRN}║                  MENU ĐIỀU KHIỂN                   ║${NC}"
-    echo -e "${BGRN}╠══════════════════════════════════════════════════════╣${NC}"
-    echo -e "${BGRN}║${NC}  ${GRN}[1]${NC} Khởi động / Setup tất cả Bot               ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${GRN}[2]${NC} Xem các tab đang chạy (tmux)               ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${GRN}[3]${NC} Xem chi tiết từng acc / Đặt username       ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${YLW}[4]${NC} Đổi Place ID / Private Server Code         ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${YLW}[5]${NC} Cài đặt Anti-AFK & Auto Restart            ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${YLW}[6]${NC} Đổi Discord Webhook                        ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${CYN}[7]${NC} Xem Log của acc                            ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${CYN}[8]${NC} Reset thống kê số lần Rejoin               ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${CYN}[9]${NC} Làm mới màn hình                           ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${GRN}[s]${NC} Quét lại Username tất cả acc               ${BGRN}║${NC}"
-    echo -e "${BGRN}║${NC}  ${RED}[0]${NC} Dừng tất cả Bot & Thoát                   ${BGRN}║${NC}"
-    echo -e "${BGRN}╚══════════════════════════════════════════════════════╝${NC}"
+    echo -e "${BGRN}+------------------------------------------------------+${NC}"
+    echo -e "${BGRN}|              MENU DIEU KHIEN                         |${NC}"
+    echo -e "${BGRN}+------------------------------------------------------+${NC}"
+    echo -e "${BGRN}|${NC}  ${GRN}[1]${NC} Khoi dong / Setup tat ca Bot                 ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${GRN}[2]${NC} Xem cac tab dang chay (tmux)                 ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${GRN}[3]${NC} Xem chi tiet tung acc / Dat username         ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${YLW}[4]${NC} Doi Place ID / Private Server Code           ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${YLW}[5]${NC} Cai dat Anti-AFK & Auto Restart              ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${YLW}[6]${NC} Doi Discord Webhook                          ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${CYN}[7]${NC} Xem Log cua acc                              ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${CYN}[8]${NC} Reset thong ke so lan Rejoin                 ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${CYN}[9]${NC} Lam moi man hinh                             ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${GRN}[s]${NC} Quet lai Username tat ca acc                 ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC}  ${RED}[0]${NC} Dung tat ca Bot & Thoat                      ${BGRN}|${NC}"
+    echo -e "${BGRN}+------------------------------------------------------+${NC}"
     echo ""
-    echo -ne "${WHT}  ➤ Chọn [0-9/s]: ${NC}"
+    echo -ne "${WHT}  > Chon [0-9/s]: ${NC}"
 }
+
 
 # ── Action: Khởi động ─────────────────────────────────────
 action_start_all() {

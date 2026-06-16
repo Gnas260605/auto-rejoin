@@ -239,7 +239,18 @@ EOF
     printf "${BGRN}║${NC}  ${BGRN}✓${NC} Acc ${YLW}%2d${NC}: ${CYN}%-28s${NC} ${GRN}%-12s${NC}${BGRN}║${NC}\n" \
         "$COUNT" "$PKG" "[$UNAME_DISPLAY]"
     COUNT=$((COUNT+1))
+
+    # Chờ 10s trước khi mở tab tiếp theo (trừ tab cuối cùng)
+    if [ $COUNT -le $TOTAL ]; then
+        printf "  ${YLW}⏳ Chờ 10s trước khi mở acc tiếp theo:${NC} "
+        for i in 10 9 8 7 6 5 4 3 2 1; do
+            printf "${YLW}%d...${NC} " $i
+            sleep 1
+        done
+        echo ""
+    fi
 done
+
 
 
 # ── WATCHDOG: Tab riêng giám sát TẤT CẢ các bot ────────
