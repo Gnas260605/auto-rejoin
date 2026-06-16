@@ -70,7 +70,7 @@ get_rejoin_count() {
 load_config() {
     # shellcheck source=/dev/null
     [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
-    PLACE_ID="${PLACE_ID:-2753915549}"
+    PLACE_ID="${PLACE_ID:-97598239454123}"
     PRIVATE_CODE="${PRIVATE_CODE:-}"
     ROBLOX_PACKAGE="${ROBLOX_PACKAGE:-com.roblox.client}"
     CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
@@ -156,15 +156,47 @@ launch_roblox() {
 
 # ── Kiểm tra mạng ────────────────────────────────────────
 check_internet() {
-    ping -c 1 -W 2 1.1.1.1 > /dev/null 2>&1
+    ping -c 1 -W 2 1.1.1.1 > /dev/null 2>&1 ||
+    ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1
 }
 
-# ── Kiểm tra Roblox đang chạy ────────────────────────────
+# ── Kiểm tra Roblox đang chạy (đa phương thức) ───────────
+# ps -A KHÔNG thấy process khác user trên UGPhone không root.
+# Dùng dumpsys activity / dumpsys window thay thế.
 is_roblox_running() {
+    local pkg="$ROBLOX_PACKAGE"
+
+    # Phương thức 1: dumpsys activity (không cần root, chuẩn nhất)
+    local act_out
+    act_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+    if [ -n "$act_out" ]; then
+        echo "$act_out" | grep -q "$pkg" && return 0
+    fi
+
+    # Phương thức 2: dumpsys window (kiểm tra cửa sổ đang hiển thị)
+    local win_out
+    win_out=$(run_cmd "dumpsys window windows" 2>/dev/null)
+    if [ -n "$win_out" ]; then
+        echo "$win_out" | grep -q "$pkg" && return 0
+    fi
+
+    # Phương thức 3: dumpsys package (kiểm tra process state)
+    local pkg_out
+    pkg_out=$(run_cmd "dumpsys package $pkg" 2>/dev/null | grep -i 'proc\|pid')
+    if echo "$pkg_out" | grep -qi 'foreground\|perceptible\|visible'; then
+        return 0
+    fi
+
+    # Phương thức 4: ps thông thường (fallback)
     local ps_out
     ps_out=$(run_cmd "ps -A" 2>/dev/null)
     [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
-    echo "$ps_out" | grep -q "$ROBLOX_PACKAGE"
+    echo "$ps_out" | grep -q "$pkg" && return 0
+
+    # Phương thức 5: pgrep
+    run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
+
+    return 1  # Không tìm thấy = game đã tắt
 }
 
 # ══════════════════════════════════════════════════════════
