@@ -9,6 +9,12 @@ CONFIG_FILE="${CONFIG_FILE:-config.cfg}"
 LOG_FILE="${LOG_FILE:-roblox_bot.log}"
 STATS_FILE="${STATS_FILE:-roblox_stats.dat}"   # lưu số lần rejoin
 
+# ── Biến toàn cục cho bot loop ──────────────────────────
+LAST_RESTART=0
+LAST_AFK_TAP=0
+LAST_LAUNCH=0
+LAUNCH_GRACE=60   # Giây chờ sau khi mở game trước khi kiểm tra crash
+
 # ── Màu sắc ─────────────────────────────────────────────
 BLK='\033[0;30m'
 RED='\033[0;31m'
@@ -49,15 +55,14 @@ inc_rejoin_count() {
     local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
     local count=0
     [ -f "$STATS_FILE" ] && count=$(grep "^${key}=" "$STATS_FILE" 2>/dev/null | cut -d= -f2)
-    count=$((${count:-0} + 1))
-    if [ -f "$STATS_FILE" ]; then
-        sed -i "s/^${key}=.*/${key}=${count}/" "$STATS_FILE" 2>/dev/null \
-            || echo "${key}=${count}" >> "$STATS_FILE"
+    count=$(( ${count:-0} + 1 ))
+    if [ -f "$STATS_FILE" ] && grep -q "^${key}=" "$STATS_FILE" 2>/dev/null; then
+        # key đã tồn tại → cập nhật
+        sed -i "s/^${key}=.*/${key}=${count}/" "$STATS_FILE" 2>/dev/null
     else
-        echo "${key}=${count}" > "$STATS_FILE"
+        # key chưa có → thêm mới
+        echo "${key}=${count}" >> "$STATS_FILE"
     fi
-    # Đảm bảo key tồn tại trong file
-    grep -q "^${key}=" "$STATS_FILE" 2>/dev/null || echo "${key}=${count}" >> "$STATS_FILE"
 }
 
 get_rejoin_count() {
@@ -119,23 +124,88 @@ run_cmd() {
     esac
 }
 
-# ── Lấy username Roblox từ app (nếu có thể) ─────────────
-# Thử đọc SharedPreferences hoặc file cấu hình Roblox
+# ── Tự động quét username Roblox ─────────────────────────
+# Thử nhiều phương thức: root SharedPrefs → DB → files → config
 get_roblox_username() {
     local pkg="${1:-$ROBLOX_PACKAGE}"
     local uname=""
-    # Thử đọc từ SharedPreferences Roblox
-    uname=$(run_cmd "cat /data/data/${pkg}/shared_prefs/*.xml 2>/dev/null" \
-        | grep -i 'username\|display_name\|playerName' \
-        | sed 's/.*value="\([^"]*\)".*/\1/' \
-        | head -1 2>/dev/null)
-    # Nếu không được, đọc từ file config tùy chỉnh
+
+    # ── Nếu có Root: thử đọc trực tiếp từ data app ──────
+    local has_root=false
+    command -v su > /dev/null 2>&1 && su -c "id" > /dev/null 2>&1 && has_root=true
+
+    if $has_root; then
+        local data_dir="/data/data/${pkg}"
+
+        # Cách 1: Đọc SharedPreferences XML (thường lưu tên acc ở đây)
+        uname=$(su -c "grep -rh 'username\|displayName\|display_name\|playerName\|userName\|name' \
+            ${data_dir}/shared_prefs/ 2>/dev/null" \
+            | grep -oP '(?<=value=")[^"]{3,40}' \
+            | grep -v '^[0-9]*$' \
+            | grep -v 'true\|false\|null' \
+            | head -1 2>/dev/null)
+
+        # Cách 2: Thử SQLite database Roblox
+        if [ -z "$uname" ]; then
+            local db_file
+            db_file=$(su -c "ls ${data_dir}/databases/*.db 2>/dev/null" | head -1)
+            if [ -n "$db_file" ]; then
+                uname=$(su -c "sqlite3 '$db_file' \
+                    \"SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;\" \
+                    2>/dev/null" | head -1)
+            fi
+        fi
+
+        # Cách 3: Tìm trong tất cả file text của app
+        if [ -z "$uname" ]; then
+            uname=$(su -c "grep -rh '\"username\"' ${data_dir}/files/ 2>/dev/null" \
+                | grep -oP '(?<="username":")[^"]{3,40}' \
+                | head -1 2>/dev/null)
+        fi
+
+        # Cách 4: Đọc account cache JSON nếu có
+        if [ -z "$uname" ]; then
+            uname=$(su -c "find ${data_dir} -name '*.json' -o -name '*account*' -o -name '*cache*' \
+                2>/dev/null | xargs grep -lh 'username' 2>/dev/null | head -1 \
+                | xargs grep -oh '\"username\":\"[^\"]*\"' 2>/dev/null" \
+                | grep -oP '(?<="username":")[^"]+' | head -1)
+        fi
+    fi
+
+    # ── Fallback: đọc từ file config (đã nhập tay trước đó) ─
     if [ -z "$uname" ]; then
         local cfg="config_${pkg}.cfg"
         uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
     fi
+
     echo "${uname:-N/A}"
 }
+
+# ── Quét username cho tất cả acc và lưu vào config ───────
+scan_all_usernames() {
+    local cfgs; cfgs=$(ls config_com*.cfg 2>/dev/null)
+    [ -z "$cfgs" ] && [ -f "config.cfg" ] && cfgs="config.cfg"
+    [ -z "$cfgs" ] && return
+
+    local found=0
+    for cfg in $cfgs; do
+        local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
+        [ -z "$pkg" ] && continue
+        local uname; uname=$(get_roblox_username "$pkg")
+        if [ "$uname" != "N/A" ] && [ -n "$uname" ]; then
+            # Cập nhật vào config
+            if grep -q '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null; then
+                sed -i "s/^ROBLOX_USERNAME=.*/ROBLOX_USERNAME=\"$uname\"/" "$cfg"
+            else
+                echo "ROBLOX_USERNAME=\"$uname\"" >> "$cfg"
+            fi
+            found=$((found+1))
+        fi
+    done
+    echo "$found"
+}
+
+
 
 # ── Mở Roblox vào game ───────────────────────────────────
 launch_roblox() {
@@ -147,12 +217,24 @@ launch_roblox() {
     else
         link="roblox://experiences/start?placeId=${PLACE_ID}"
     fi
-    run_cmd "am start -a android.intent.action.VIEW -d \"$link\" $pkg" > /dev/null 2>&1 \
-        || run_cmd "am start -n $pkg/.MainActivity" > /dev/null 2>&1
+
+    # Cách 1: am start với deep link (chỉ định package)
+    run_cmd "am start -a android.intent.action.VIEW -d \"$link\" -p $pkg" > /dev/null 2>&1
+    local ret=$?
+    # Cách 2: am start không chỉ định package
+    [ $ret -ne 0 ] && run_cmd "am start -a android.intent.action.VIEW -d \"$link\"" > /dev/null 2>&1 && ret=$?
+    # Cách 3: Mở thẳng MainActivity
+    if [ $ret -ne 0 ]; then
+        run_cmd "am start -n $pkg/.MainActivity" > /dev/null 2>&1 ||
+        run_cmd "monkey -p $pkg 1" > /dev/null 2>&1
+    fi
 
     LAST_RESTART=$(date +%s)
     LAST_AFK_TAP=$(date +%s)
+    LAST_LAUNCH=$(date +%s)
+    log_msg "${GRN}[LAUNCH]${NC} Đã gửi lệnh mở game. Chờ ${LAUNCH_GRACE}s trước khi giám sát..."
 }
+
 
 # ── Kiểm tra mạng ────────────────────────────────────────
 check_internet() {
@@ -237,7 +319,14 @@ start_bot() {
             continue
         fi
 
-        # [1] Kiểm tra crash
+        # [1] Kiểm tra crash — Bỏ qua nếu game vừa mới được mở (grace period)
+        local NOW_CHK; NOW_CHK=$(date +%s)
+        if [ $(( NOW_CHK - LAST_LAUNCH )) -lt "$LAUNCH_GRACE" ]; then
+            local remaining=$(( LAUNCH_GRACE - NOW_CHK + LAST_LAUNCH ))
+            log_msg "${CYN}[WAIT]${NC} Đang chờ game tải... (${remaining}s còn lại)"
+            continue
+        fi
+
         if ! is_roblox_running; then
             local cnt; cnt=$(get_rejoin_count "$ROBLOX_PACKAGE")
             log_msg "${RED}[CRASH]${NC} Game bị tắt/crash! Rejoin lần #$((cnt+1))..."
@@ -252,18 +341,18 @@ start_bot() {
 
         # [2] Anti-AFK
         if [ "$ANTI_AFK" = "true" ]; then
-            local NOW; NOW=$(date +%s)
-            if [ $(( NOW - LAST_AFK_TAP )) -ge "$AFK_TAP_INTERVAL" ]; then
+            local NOW_AFK; NOW_AFK=$(date +%s)
+            if [ $(( NOW_AFK - LAST_AFK_TAP )) -ge "$AFK_TAP_INTERVAL" ]; then
                 log_msg "${CYN}[AFK]${NC} Gửi tap tại ($TAP_X, $TAP_Y)"
                 run_cmd "input tap $TAP_X $TAP_Y" > /dev/null 2>&1
-                LAST_AFK_TAP=$NOW
+                LAST_AFK_TAP=$NOW_AFK
             fi
         fi
 
         # [3] Auto Restart định kỳ
         if [ "${AUTO_RESTART_PERIOD:-0}" -gt 0 ]; then
-            local NOW; NOW=$(date +%s)
-            if [ $(( NOW - LAST_RESTART )) -ge "$AUTO_RESTART_PERIOD" ]; then
+            local NOW_RST; NOW_RST=$(date +%s)
+            if [ $(( NOW_RST - LAST_RESTART )) -ge "$AUTO_RESTART_PERIOD" ]; then
                 log_msg "${YLW}[RESTART]${NC} Restart định kỳ (${AUTO_RESTART_PERIOD}s)..."
                 send_discord "🔄 **[$ROBLOX_PACKAGE]** Auto restart định kỳ."
                 run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
@@ -308,11 +397,8 @@ get_all_configs() {
 draw_main_status() {
     init_executor
     local cfgs; cfgs=$(get_all_configs)
-    local ps_out
-    ps_out=$(run_cmd "ps -A" 2>/dev/null)
-    [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
     local tmux_wins
-    tmux_wins=$(tmux list-windows -t roblox-multi 2>/dev/null)
+    tmux_wins=$(tmux list-windows -t roblox-multi -F "#{window_name}" 2>/dev/null)
 
     local total_online=0 total_acc=0
 
@@ -326,29 +412,31 @@ draw_main_status() {
         local idx=1
         for cfg in $cfgs; do
             [ -f "$cfg" ] || continue
-            # Đọc package từ config
             local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
             [ -z "$pkg" ] && continue
             total_acc=$((total_acc+1))
 
-            # Username
+            # Username từ config
             local uname; uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
-            uname="${uname:-N/A}"
             uname="${uname:0:10}"
+            uname="${uname:-N/A}"
 
-            # Trạng thái game
+            # Trạng thái game: dùng dumpsys (không cần root)
             local game_s="${RED}OFFLINE   ${NC}"
-            echo "$ps_out" | grep -q "$pkg" && { game_s="${BGRN}● ONLINE  ${NC}"; total_online=$((total_online+1)); }
+            local dump_act; dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+            if echo "$dump_act" | grep -q "$pkg"; then
+                game_s="${BGRN}● ONLINE  ${NC}"
+                total_online=$((total_online+1))
+            fi
 
             # Trạng thái bot tmux
             local win_name="${pkg//./_}"
             local bot_s="${RED}STOPPED ${NC}"
-            echo "$tmux_wins" | grep -q "$win_name" && bot_s="${GRN}RUNNING ${NC}"
+            echo "$tmux_wins" | grep -q "^${win_name}$" && bot_s="${GRN}RUNNING ${NC}"
 
             # Số lần rejoin
             local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
 
-            # Tên rút gọn
             local short_pkg="${pkg:0:27}"
 
             printf "${BGRN}║${NC} %-2s${BGRN}║${NC} %-27s ${BGRN}║${NC} %-9s ${BGRN}║${NC} " \
@@ -425,8 +513,7 @@ view_clone_detail() {
     local log_file="roblox_${pkg}.log"
     local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
 
-    local ps_out; ps_out=$(run_cmd "ps -A" 2>/dev/null)
-    [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+    local ps_out; ps_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
     local game_s="${RED}OFFLINE${NC}"
     echo "$ps_out" | grep -q "$pkg" && game_s="${BGRN}● ONLINE${NC}"
 
@@ -489,6 +576,8 @@ view_clone_detail() {
 show_menu() {
     load_config
     init_executor
+    # Tự động quét username ngầm (nhanh, không block UI)
+    scan_all_usernames > /dev/null 2>&1 &
     clear
     draw_header
     echo ""
@@ -506,10 +595,11 @@ show_menu() {
     echo -e "${BGRN}║${NC}  ${CYN}[7]${NC} Xem Log của acc                            ${BGRN}║${NC}"
     echo -e "${BGRN}║${NC}  ${CYN}[8]${NC} Reset thống kê số lần Rejoin               ${BGRN}║${NC}"
     echo -e "${BGRN}║${NC}  ${CYN}[9]${NC} Làm mới màn hình                           ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${GRN}[s]${NC} Quét lại Username tất cả acc               ${BGRN}║${NC}"
     echo -e "${BGRN}║${NC}  ${RED}[0]${NC} Dừng tất cả Bot & Thoát                   ${BGRN}║${NC}"
     echo -e "${BGRN}╚══════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -ne "${WHT}  ➤ Chọn [0-9]: ${NC}"
+    echo -ne "${WHT}  ➤ Chọn [0-9/s]: ${NC}"
 }
 
 # ── Action: Khởi động ─────────────────────────────────────
@@ -675,6 +765,12 @@ else
     while true; do
         show_menu
         read -r choice
+        # Xoá ký tự \r (carriage return từ bàn phím Android) và khoảng trắng
+        choice="${choice//$'\r'/}"
+        choice="${choice//$'\n'/}"
+        choice="${choice// /}"
+        # Nếu bấm Enter không nhập gì → tự refresh (không báo lỗi)
+        [ -z "$choice" ] && continue
         case "$choice" in
             1) action_start_all ;;
             2) action_attach_tmux ;;
@@ -685,8 +781,22 @@ else
             7) action_view_log ;;
             8) action_reset_stats ;;
             9) ;; # loop lại = refresh
+            s|S)
+                clear
+                echo -e "${BGRN}[*] Đang quét username tất cả acc...${NC}"
+                found=$(scan_all_usernames)
+                if [ "${found:-0}" -gt 0 ]; then
+                    echo -e "${GRN}✓ Tìm thấy và lưu ${found} username thành công!${NC}"
+                else
+                    echo -e "${YLW}⚠ Không quét được username tự động.${NC}"
+                    echo -e "  Lý do có thể: thiết bị không có root."
+                    echo -e "  → Dùng menu [3] để nhập username thủ công."
+                fi
+                echo -ne "\n${WHT}Nhấn Enter để quay lại...${NC}"; read -r
+                ;;
             0) action_stop_all ;;
-            *) echo -e "${RED}  Lựa chọn không hợp lệ!${NC}"; sleep 0.7 ;;
+            *) echo -e "${RED}  Lựa chọn không hợp lệ! Nhập số từ 0-9${NC}"; sleep 0.7 ;;
         esac
     done
 fi
+

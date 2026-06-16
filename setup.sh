@@ -163,14 +163,53 @@ echo -e "${BGRN}╠════════════════════�
 
 COUNT=1
 TOTAL=$(echo "$PACKAGES" | wc -w)
+
+# ── Hỏi username cho từng acc TRƯỚC khi khởi động ──────
+echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${BGRN}║   NHẬP USERNAME ROBLOX CHO TỪNG TÀI KHOẢN       ║${NC}"
+echo -e "${BGRN}║   (Bấm Enter để bỏ qua nếu chưa biết)           ║${NC}"
+echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
+echo ""
+
+declare -A USERNAME_MAP
+idx=1
+for PKG in $PACKAGES; do
+    CFG="config_${PKG}.cfg"
+    # Lấy username đã lưu trước đó nếu có
+    OLD_UNAME=""
+    [ -f "$CFG" ] && OLD_UNAME=$(grep '^ROBLOX_USERNAME=' "$CFG" 2>/dev/null | cut -d'"' -f2)
+
+    SHORT_PKG="${PKG: -8}"   # Lấy 8 ký tự cuối để phân biệt (client, client1, ...)
+    if [ -n "$OLD_UNAME" ]; then
+        echo -ne "  ${YLW}[$idx]${NC} Acc ${CYN}$SHORT_PKG${NC} (hiện tại: ${GRN}$OLD_UNAME${NC}): "
+    else
+        echo -ne "  ${YLW}[$idx]${NC} Acc ${CYN}$SHORT_PKG${NC} username: "
+    fi
+
+    read -r INPUT_UNAME
+    INPUT_UNAME="${INPUT_UNAME//$'\r'/}"
+    INPUT_UNAME="${INPUT_UNAME// /}"
+
+    if [ -n "$INPUT_UNAME" ]; then
+        USERNAME_MAP["$PKG"]="$INPUT_UNAME"
+    elif [ -n "$OLD_UNAME" ]; then
+        USERNAME_MAP["$PKG"]="$OLD_UNAME"   # Giữ username cũ
+    else
+        USERNAME_MAP["$PKG"]=""
+    fi
+    idx=$((idx+1))
+done
+echo ""
+
+echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${BGRN}║       KHỞI ĐỘNG BOT CHO TỪNG TÀI KHOẢN         ║${NC}"
+echo -e "${BGRN}╠══════════════════════════════════════════════════╣${NC}"
+
 for PKG in $PACKAGES; do
     CFG="config_${PKG}.cfg"
     LOG="roblox_${PKG}.log"
     WIN="${PKG//./_}"
-
-    # Tạo config nếu chưa có (giữ username nếu đã lưu)
-    SAVED_USERNAME=""
-    [ -f "$CFG" ] && SAVED_USERNAME=$(grep '^ROBLOX_USERNAME=' "$CFG" 2>/dev/null | cut -d'"' -f2)
+    SAVED_USERNAME="${USERNAME_MAP[$PKG]:-}"
 
     cat > "$CFG" <<EOF
 PLACE_ID="$PLACE_ID"
@@ -183,7 +222,7 @@ AFK_TAP_INTERVAL=180
 TAP_X=540
 TAP_Y=960
 DISCORD_WEBHOOK=""
-ROBLOX_USERNAME="${SAVED_USERNAME:-}"
+ROBLOX_USERNAME="${SAVED_USERNAME}"
 EOF
 
     progress_bar $COUNT $TOTAL "Khởi động acc $COUNT/$TOTAL..."
@@ -196,9 +235,85 @@ EOF
     tmux send-keys -t "roblox-multi:${WIN}" \
         "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats.dat\" bash auto_rejoin.sh --run" C-m 2>/dev/null
 
-    printf "${BGRN}║${NC}  ${BGRN}✓${NC} Acc ${YLW}%2d${NC}: ${CYN}%-40s${NC}${BGRN}║${NC}\n" "$COUNT" "$PKG"
+    UNAME_DISPLAY="${SAVED_USERNAME:-N/A}"
+    printf "${BGRN}║${NC}  ${BGRN}✓${NC} Acc ${YLW}%2d${NC}: ${CYN}%-28s${NC} ${GRN}%-12s${NC}${BGRN}║${NC}\n" \
+        "$COUNT" "$PKG" "[$UNAME_DISPLAY]"
     COUNT=$((COUNT+1))
 done
+
+
+# ── WATCHDOG: Tab riêng giám sát TẤT CẢ các bot ────────
+# Nếu bản thân script bot bị crash trong tmux → watchdog restart nó
+tmux new-window -t roblox-multi -n "WATCHDOG" 2>/dev/null
+
+# Tạo danh sách tất cả package để watchdog theo dõi
+ALL_PKGS_LINE="$PACKAGES"
+ALL_CFGS_LINE=""
+for PKG in $PACKAGES; do
+    CFG="config_${PKG}.cfg"
+    LOG="roblox_${PKG}.log"
+    ALL_CFGS_LINE="$ALL_CFGS_LINE $CFG:$PKG:$LOG"
+done
+
+# Ghi script watchdog vào file tạm rồi chạy
+cat > /tmp/watchdog_roblox.sh << 'WDEOF'
+#!/bin/bash
+BGRN='\033[1;32m'; GRN='\033[0;32m'; RED='\033[0;31m'; YLW='\033[0;33m'; CYN='\033[0;36m'; NC='\033[0m'
+ALL_CFGS="$1"   # Danh sách "cfg:pkg:log" cách nhau bằng space
+
+echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${BGRN}║       WATCHDOG - GIÁM SÁT TẤT CẢ BOT        ║${NC}"
+echo -e "${BGRN}║   Kiểm tra mỗi 30s, tự restart bot chết     ║${NC}"
+echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
+echo ""
+
+while true; do
+    TS=$(date '+%H:%M:%S')
+    echo -e "${CYN}[$TS]${NC} Đang kiểm tra ${YLW}$(echo $ALL_CFGS | wc -w)${NC} bot..."
+
+    for ENTRY in $ALL_CFGS; do
+        CFG=$(echo "$ENTRY" | cut -d: -f1)
+        PKG=$(echo "$ENTRY" | cut -d: -f2)
+        LOG=$(echo "$ENTRY" | cut -d: -f3)
+        WIN="${PKG//./_}"
+
+        # Kiểm tra tmux window của acc này có còn chạy bot không
+        # Dấu hiệu: pane của window không có tiến trình bash/auto_rejoin
+        WIN_PANE=$(tmux list-panes -t "roblox-multi:${WIN}" -F "#{pane_current_command}" 2>/dev/null)
+
+        if [ -z "$WIN_PANE" ] || [ "$WIN_PANE" = "bash" ] && ! tmux list-panes -t "roblox-multi:${WIN}" -F "#{pane_pid}" 2>/dev/null | xargs ps -p > /dev/null 2>&1; then
+            # Window không tồn tại → tạo lại
+            echo -e "  ${RED}[WATCHDOG]${NC} Window '${WIN}' đã chết! Đang khởi động lại..."
+            tmux new-window -t roblox-multi -n "$WIN" 2>/dev/null
+            tmux send-keys -t "roblox-multi:${WIN}" \
+                "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats.dat\" bash auto_rejoin.sh --run" C-m 2>/dev/null
+            echo -e "  ${GRN}[WATCHDOG]${NC} Đã restart bot cho: ${CYN}$PKG${NC}"
+        else
+            # Kiểm tra pane có còn chạy script không (không phải shell rảnh)
+            PANE_CMD=$(tmux list-panes -t "roblox-multi:${WIN}" -F "#{pane_current_command}" 2>/dev/null | head -1)
+            if [ "$PANE_CMD" = "bash" ] || [ -z "$PANE_CMD" ]; then
+                # Pane có shell nhưng script đã thoát → restart
+                echo -e "  ${YLW}[WATCHDOG]${NC} Bot '${WIN}' đã thoát. Đang restart..."
+                tmux send-keys -t "roblox-multi:${WIN}" \
+                    "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats.dat\" bash auto_rejoin.sh --run" C-m 2>/dev/null
+                echo -e "  ${GRN}[WATCHDOG]${NC} Đã restart: ${CYN}$PKG${NC}"
+            else
+                echo -e "  ${GRN}  ✓${NC} $PKG → ${GRN}OK${NC}"
+            fi
+        fi
+    done
+
+    echo ""
+    sleep 30
+done
+WDEOF
+chmod +x /tmp/watchdog_roblox.sh
+
+tmux send-keys -t "roblox-multi:WATCHDOG" \
+    "bash /tmp/watchdog_roblox.sh '${ALL_CFGS_LINE}'" C-m 2>/dev/null
+
+printf "${BGRN}║${NC}  ${BGRN}✓${NC} ${YLW}WATCHDOG${NC}: Giám sát toàn bộ ${YLW}$((COUNT-1))${NC} acc          ${BGRN}║${NC}\n"
+
 
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
