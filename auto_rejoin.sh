@@ -1,64 +1,89 @@
 #!/bin/bash
+# ╔══════════════════════════════════════════════════════╗
+# ║      ROBLOX AUTO REJOIN MULTI-CLONE BOT v3.1        ║
+# ║      GitHub: Gnas260605/auto-rejoin                 ║
+# ╚══════════════════════════════════════════════════════╝
 
-# Đường dẫn file cấu hình (cho phép ghi đè qua biến môi trường để chạy multi-acc)
+# ── Đường dẫn (có thể ghi đè qua biến môi trường) ──────
 CONFIG_FILE="${CONFIG_FILE:-config.cfg}"
 LOG_FILE="${LOG_FILE:-roblox_bot.log}"
+STATS_FILE="${STATS_FILE:-roblox_stats.dat}"   # lưu số lần rejoin
 
-# Màu sắc hiển thị CLI
+# ── Màu sắc ─────────────────────────────────────────────
+BLK='\033[0;30m'
 RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0;m' # No Color
+GRN='\033[0;32m'
+YLW='\033[0;33m'
+BLU='\033[0;34m'
+MGT='\033[0;35m'
+CYN='\033[0;36m'
+WHT='\033[1;37m'
+BGRN='\033[1;32m'   # Bright Green
+BYLN='\033[1;33m'   # Bright Yellow
+NC='\033[0m'
 
-# Hàm ghi Log
+# ── Âm thanh thông báo (beep qua /dev/tty nếu có) ───────
+beep_ok()   { printf '\a' 2>/dev/null; }
+beep_warn() { printf '\a\a' 2>/dev/null; }
+
+# ── Ghi log ─────────────────────────────────────────────
 log_msg() {
-    local msg="$1"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${CYAN}[$timestamp]${NC} $msg"
-    echo "[$timestamp] $msg" >> "$LOG_FILE"
+    local ts; ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo -e "${CYN}[$ts]${NC} $1"
+    # Lưu plain text vào file log (bỏ mã ANSI)
+    echo "[$ts] $(echo "$1" | sed 's/\x1b\[[0-9;]*m//g')" >> "$LOG_FILE"
 }
 
-# Hàm gửi Discord Webhook
+# ── Gửi Discord Webhook ──────────────────────────────────
 send_discord() {
-    local message="$1"
-    if [ -n "$DISCORD_WEBHOOK" ]; then
-        curl -H "Content-Type: application/json" \
-             -X POST \
-             -d "{\"content\": \"$message\"}" \
-             "$DISCORD_WEBHOOK" >/dev/null 2>&1
-    fi
+    [ -z "$DISCORD_WEBHOOK" ] && return
+    curl -s -H "Content-Type: application/json" \
+         -X POST \
+         -d "{\"content\": \"$1\"}" \
+         "$DISCORD_WEBHOOK" > /dev/null 2>&1
 }
 
-# Tải cấu hình
-load_config() {
-    if [ -f "$CONFIG_FILE" ]; then
-        source "$CONFIG_FILE"
-        # Dự phòng nếu file cấu hình cũ chưa có ROBLOX_PACKAGE
-        if [ -z "$ROBLOX_PACKAGE" ]; then
-            ROBLOX_PACKAGE="com.roblox.client"
-        fi
+# ── Thống kê rejoin ──────────────────────────────────────
+inc_rejoin_count() {
+    local pkg="${1:-$ROBLOX_PACKAGE}"
+    local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
+    local count=0
+    [ -f "$STATS_FILE" ] && count=$(grep "^${key}=" "$STATS_FILE" 2>/dev/null | cut -d= -f2)
+    count=$((${count:-0} + 1))
+    if [ -f "$STATS_FILE" ]; then
+        sed -i "s/^${key}=.*/${key}=${count}/" "$STATS_FILE" 2>/dev/null \
+            || echo "${key}=${count}" >> "$STATS_FILE"
     else
-        # Cấu hình mặc định
-        PLACE_ID="2753915549"
-        PRIVATE_CODE=""
-        ROBLOX_PACKAGE="com.roblox.client"
-        CHECK_INTERVAL=30
-        AUTO_RESTART_PERIOD=7200
-        ANTI_AFK=true
-        AFK_TAP_INTERVAL=180
-        TAP_X=500
-        TAP_Y=500
-        DISCORD_WEBHOOK=""
-        save_config
+        echo "${key}=${count}" > "$STATS_FILE"
     fi
+    # Đảm bảo key tồn tại trong file
+    grep -q "^${key}=" "$STATS_FILE" 2>/dev/null || echo "${key}=${count}" >> "$STATS_FILE"
 }
 
-# Lưu cấu hình
+get_rejoin_count() {
+    local pkg="${1:-$ROBLOX_PACKAGE}"
+    local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
+    [ -f "$STATS_FILE" ] && grep "^${key}=" "$STATS_FILE" 2>/dev/null | cut -d= -f2 || echo "0"
+}
+
+# ── Tải/Lưu cấu hình ─────────────────────────────────────
+load_config() {
+    # shellcheck source=/dev/null
+    [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
+    PLACE_ID="${PLACE_ID:-2753915549}"
+    PRIVATE_CODE="${PRIVATE_CODE:-}"
+    ROBLOX_PACKAGE="${ROBLOX_PACKAGE:-com.roblox.client}"
+    CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
+    AUTO_RESTART_PERIOD="${AUTO_RESTART_PERIOD:-7200}"
+    ANTI_AFK="${ANTI_AFK:-true}"
+    AFK_TAP_INTERVAL="${AFK_TAP_INTERVAL:-180}"
+    TAP_X="${TAP_X:-540}"
+    TAP_Y="${TAP_Y:-960}"
+    DISCORD_WEBHOOK="${DISCORD_WEBHOOK:-}"
+}
+
 save_config() {
-    cat <<EOF > "$CONFIG_FILE"
+    cat > "$CONFIG_FILE" <<EOF
 PLACE_ID="$PLACE_ID"
 PRIVATE_CODE="$PRIVATE_CODE"
 ROBLOX_PACKAGE="$ROBLOX_PACKAGE"
@@ -72,141 +97,144 @@ DISCORD_WEBHOOK="$DISCORD_WEBHOOK"
 EOF
 }
 
-# Tự động phát hiện phương thức thực thi lệnh (su, adb hoặc direct)
+# ── Phát hiện executor ───────────────────────────────────
 detect_executor() {
-    if command -v su >/dev/null 2>&1 && su -c "id" >/dev/null 2>&1; then
-        echo "su -c"
-    elif command -v adb >/dev/null 2>&1 && adb shell "id" >/dev/null 2>&1; then
-        echo "adb shell"
+    if command -v su > /dev/null 2>&1 && su -c "id" > /dev/null 2>&1; then
+        echo "su"
+    elif command -v adb > /dev/null 2>&1 && adb shell "id" > /dev/null 2>&1; then
+        echo "adb"
     else
         echo "direct"
     fi
 }
 
-EXECUTOR=$(detect_executor)
+EXECUTOR=""
+init_executor() { EXECUTOR=$(detect_executor); }
 
 run_cmd() {
-    local cmd="$1"
-    if [ "$EXECUTOR" = "su -c" ]; then
-        su -c "$cmd"
-    elif [ "$EXECUTOR" = "adb shell" ]; then
-        adb shell "$cmd"
-    else
-        eval "$cmd"
-    fi
+    case "$EXECUTOR" in
+        su)     su -c "$1" ;;
+        adb)    adb shell "$1" ;;
+        *)      eval "$1" ;;
+    esac
 }
 
-# Hàm mở game Roblox
-launch_roblox() {
-    log_msg "${YELLOW}[*] Đang khởi động ứng dụng Roblox ($ROBLOX_PACKAGE)...${NC}"
-    if [ -n "$PRIVATE_CODE" ]; then
-        log_msg "[*] Vào Server riêng (Private Code: $PRIVATE_CODE)"
-        # Một số Cloner sử dụng intent filter trực tiếp của package clone
-        run_cmd "am start -p $ROBLOX_PACKAGE -a android.intent.action.VIEW -d \"roblox://navigation/share_links?code=${PRIVATE_CODE}&type=Server\""
-        send_discord "🎮 **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Đang kết nối vào Server riêng mã \`$PRIVATE_CODE\`."
-    else
-        log_msg "[*] Vào Server thường (PlaceID: $PLACE_ID)"
-        run_cmd "am start -p $ROBLOX_PACKAGE -a android.intent.action.VIEW -d \"roblox://experiences/start?placeId=${PLACE_ID}\""
-        send_discord "🎮 **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Đang kết nối vào PlaceID: \`$PLACE_ID\`."
+# ── Lấy username Roblox từ app (nếu có thể) ─────────────
+# Thử đọc SharedPreferences hoặc file cấu hình Roblox
+get_roblox_username() {
+    local pkg="${1:-$ROBLOX_PACKAGE}"
+    local uname=""
+    # Thử đọc từ SharedPreferences Roblox
+    uname=$(run_cmd "cat /data/data/${pkg}/shared_prefs/*.xml 2>/dev/null" \
+        | grep -i 'username\|display_name\|playerName' \
+        | sed 's/.*value="\([^"]*\)".*/\1/' \
+        | head -1 2>/dev/null)
+    # Nếu không được, đọc từ file config tùy chỉnh
+    if [ -z "$uname" ]; then
+        local cfg="config_${pkg}.cfg"
+        uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
     fi
+    echo "${uname:-N/A}"
+}
+
+# ── Mở Roblox vào game ───────────────────────────────────
+launch_roblox() {
+    local pkg="${ROBLOX_PACKAGE}"
+    log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
+    local link
+    if [ -n "$PRIVATE_CODE" ]; then
+        link="roblox://navigation/share_links?code=${PRIVATE_CODE}&type=Server"
+    else
+        link="roblox://experiences/start?placeId=${PLACE_ID}"
+    fi
+    run_cmd "am start -a android.intent.action.VIEW -d \"$link\" $pkg" > /dev/null 2>&1 \
+        || run_cmd "am start -n $pkg/.MainActivity" > /dev/null 2>&1
+
     LAST_RESTART=$(date +%s)
     LAST_AFK_TAP=$(date +%s)
 }
 
-# Kiểm tra xem thiết bị có kết nối Internet không
+# ── Kiểm tra mạng ────────────────────────────────────────
 check_internet() {
-    # Thử ping tới Cloudflare DNS trong 2 giây
-    if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
-        return 0 # Có mạng
-    else
-        return 1 # Mất mạng
-    fi
+    ping -c 1 -W 2 1.1.1.1 > /dev/null 2>&1
 }
 
-# Kiểm tra xem tiến trình Roblox có đang chạy (tiền cảnh hoặc chạy ngầm) hay không
+# ── Kiểm tra Roblox đang chạy ────────────────────────────
 is_roblox_running() {
-    local ps_info
-    ps_info=$(run_cmd "ps -A")
-    # Nếu không hỗ trợ ps -A, thử ps thường
-    if [ -z "$ps_info" ]; then
-        ps_info=$(run_cmd "ps")
-    fi
-    
-    if echo "$ps_info" | grep -q "$ROBLOX_PACKAGE"; then
-        return 0 # Roblox vẫn đang chạy
-    else
-        return 1 # Roblox đã bị tắt hoàn toàn
-    fi
+    local ps_out
+    ps_out=$(run_cmd "ps -A" 2>/dev/null)
+    [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+    echo "$ps_out" | grep -q "$ROBLOX_PACKAGE"
 }
 
-# Hàm chạy tiến trình Auto Rejoin
+# ══════════════════════════════════════════════════════════
+#  CHẾ ĐỘ --run : VÒNG LẶP GIÁM SÁT (chạy trong tmux)
+# ══════════════════════════════════════════════════════════
 start_bot() {
     load_config
+    init_executor
     clear
-    echo -e "${GREEN}====================================================${NC}"
-    echo -e "${GREEN}        ROBLOX AUTO REJOIN BOT ĐANG HOẠT ĐỘNG         ${NC}"
-    echo -e "${GREEN}====================================================${NC}"
-    echo -e "${CYAN}Package Name: ${NC}$ROBLOX_PACKAGE"
-    echo -e "${CYAN}Chế độ: ${NC}PlaceID: $PLACE_ID / Private: $PRIVATE_CODE"
-    echo -e "${CYAN}Phương thức: ${NC}$EXECUTOR"
-    echo -e "${CYAN}Anti-AFK: ${NC}$ANTI_AFK (Mỗi $AFK_TAP_INTERVAL giây tại tọa độ X:$TAP_X Y:$TAP_Y)"
-    echo -e "${CYAN}Thời gian Check: ${NC}$CHECK_INTERVAL giây"
-    echo -e "${CYAN}Log File: ${NC}$LOG_FILE"
-    echo -e "${GREEN}====================================================${NC}"
-    log_msg "[+] Bắt đầu giám sát Roblox..."
-    
-    # Khởi động game lần đầu
+    echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║   ROBLOX AUTO REJOIN - ĐANG CHẠY NGẦM  ║${NC}"
+    echo -e "${BGRN}╚══════════════════════════════════════════╝${NC}"
+    echo -e " ${GRN}Package :${NC} $ROBLOX_PACKAGE"
+    echo -e " ${GRN}PlaceID :${NC} $PLACE_ID  ${GRN}Private:${NC} ${PRIVATE_CODE:-Không}"
+    echo -e " ${GRN}Executor:${NC} $EXECUTOR  ${GRN}Anti-AFK:${NC} $ANTI_AFK"
+    echo -e "${BGRN}══════════════════════════════════════════${NC}"
+    log_msg "${GRN}[START]${NC} Bot khởi động, bắt đầu giám sát..."
+    beep_ok
+
     launch_roblox
 
     while true; do
-        sleep $CHECK_INTERVAL
-        
-        # 0. Kiểm tra kết nối mạng (Tránh spam mở game khi mất mạng)
+        sleep "$CHECK_INTERVAL"
+
+        # [0] Kiểm tra mạng
         if ! check_internet; then
-            log_msg "${RED}[!] Phát hiện mất kết nối Internet! Đang tạm dừng kiểm tra và chờ mạng...${NC}"
-            send_discord "⚠️ **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Thiết bị mất kết nối mạng! Tạm dừng chờ mạng hồi phục..."
-            
-            while ! check_internet; do
-                sleep 10
-            done
-            
-            log_msg "${GREEN}[+] Đã có mạng trở lại! Tiến hành dọn dẹp và khởi động lại game...${NC}"
-            send_discord "📶 **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Đã kết nối lại Internet! Đang vào lại game..."
-            run_cmd "am force-stop $ROBLOX_PACKAGE"
+            log_msg "${RED}[NET]${NC} Mất kết nối Internet! Chờ mạng..."
+            beep_warn
+            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Mất kết nối Internet!"
+            while ! check_internet; do sleep 10; done
+            log_msg "${GRN}[NET]${NC} Có mạng lại! Khởi động game..."
+            beep_ok
+            send_discord "📶 **[$ROBLOX_PACKAGE]** Có mạng, đang vào game!"
+            run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
             sleep 3
+            inc_rejoin_count "$ROBLOX_PACKAGE"
             launch_roblox
             continue
         fi
 
-        # 1. Kiểm tra sự cố crash hoặc tắt app
+        # [1] Kiểm tra crash
         if ! is_roblox_running; then
-            log_msg "${RED}[!] Cảnh báo: Phát hiện Roblox ($ROBLOX_PACKAGE) đã bị tắt hoặc crash!${NC}"
-            send_discord "⚠️ **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Phát hiện game bị crash/tắt! Đang khởi động lại..."
-            run_cmd "am force-stop $ROBLOX_PACKAGE"
+            local cnt; cnt=$(get_rejoin_count "$ROBLOX_PACKAGE")
+            log_msg "${RED}[CRASH]${NC} Game bị tắt/crash! Rejoin lần #$((cnt+1))..."
+            beep_warn
+            send_discord "💥 **[$ROBLOX_PACKAGE]** Crash! Rejoin lần #$((cnt+1))..."
+            run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
             sleep 3
+            inc_rejoin_count "$ROBLOX_PACKAGE"
             launch_roblox
             continue
         fi
 
-        # 2. Xử lý click Anti-AFK chống bị kick treo máy
-        if [ "$ANTI_AFK" = true ]; then
-            NOW=$(date +%s)
-            ELAPSED_AFK=$((NOW - LAST_AFK_TAP))
-            if [ "$ELAPSED_AFK" -ge "$AFK_TAP_INTERVAL" ]; then
-                log_msg "[*] Đang gửi click Anti-AFK giả lập chạm màn hình tại tọa độ ($TAP_X, $TAP_Y)..."
-                run_cmd "input tap $TAP_X $TAP_Y"
+        # [2] Anti-AFK
+        if [ "$ANTI_AFK" = "true" ]; then
+            local NOW; NOW=$(date +%s)
+            if [ $(( NOW - LAST_AFK_TAP )) -ge "$AFK_TAP_INTERVAL" ]; then
+                log_msg "${CYN}[AFK]${NC} Gửi tap tại ($TAP_X, $TAP_Y)"
+                run_cmd "input tap $TAP_X $TAP_Y" > /dev/null 2>&1
                 LAST_AFK_TAP=$NOW
             fi
         fi
 
-        # 3. Tự động Restart tối ưu RAM định kỳ
-        if [ "$AUTO_RESTART_PERIOD" -gt 0 ]; then
-            NOW=$(date +%s)
-            ELAPSED_RESTART=$((NOW - LAST_RESTART))
-            if [ "$ELAPSED_RESTART" -ge "$AUTO_RESTART_PERIOD" ]; then
-                log_msg "${YELLOW}[*] Khởi động lại định kỳ ($AUTO_RESTART_PERIOD giây) để tránh giật lag...${NC}"
-                send_discord "🔄 **Roblox Auto Rejoin ($ROBLOX_PACKAGE):** Tự động khởi động lại định kỳ để làm mới bộ nhớ."
-                run_cmd "am force-stop $ROBLOX_PACKAGE"
+        # [3] Auto Restart định kỳ
+        if [ "${AUTO_RESTART_PERIOD:-0}" -gt 0 ]; then
+            local NOW; NOW=$(date +%s)
+            if [ $(( NOW - LAST_RESTART )) -ge "$AUTO_RESTART_PERIOD" ]; then
+                log_msg "${YLW}[RESTART]${NC} Restart định kỳ (${AUTO_RESTART_PERIOD}s)..."
+                send_discord "🔄 **[$ROBLOX_PACKAGE]** Auto restart định kỳ."
+                run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
                 sleep 3
                 launch_roblox
             fi
@@ -214,155 +242,419 @@ start_bot() {
     done
 }
 
-# Bảng theo dõi trạng thái trực quan các bản Clone
-show_status_monitor() {
+# ══════════════════════════════════════════════════════════
+#  HELPER: Progress bar
+# ══════════════════════════════════════════════════════════
+progress_bar() {
+    local current=$1 total=$2 label="${3:-Loading}"
+    local width=36
+    local filled=$(( current * width / total ))
+    local empty=$(( width - filled ))
+    local bar=""
+    local i
+    for (( i=0; i<filled; i++ )); do bar+="█"; done
+    for (( i=0; i<empty; i++ )); do bar+="░"; done
+    printf "\r ${GRN}[${bar}]${NC} ${YLW}%3d%%${NC} %s" $(( current * 100 / total )) "$label"
+    [ "$current" -eq "$total" ] && echo ""
+}
+
+# ══════════════════════════════════════════════════════════
+#  MENU: Lấy danh sách config của các acc
+# ══════════════════════════════════════════════════════════
+get_all_configs() {
+    local cfgs
+    cfgs=$(ls config_com*.cfg 2>/dev/null | sort)
+    if [ -z "$cfgs" ] && [ -f "config.cfg" ]; then
+        cfgs="config.cfg"
+    fi
+    echo "$cfgs"
+}
+
+# ══════════════════════════════════════════════════════════
+#  MENU: Bảng trạng thái tổng quan
+# ══════════════════════════════════════════════════════════
+draw_main_status() {
+    init_executor
+    local cfgs; cfgs=$(get_all_configs)
+    local ps_out
+    ps_out=$(run_cmd "ps -A" 2>/dev/null)
+    [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+    local tmux_wins
+    tmux_wins=$(tmux list-windows -t roblox-multi 2>/dev/null)
+
+    local total_online=0 total_acc=0
+
+    echo -e "${BGRN}╔═══╦═══════════════════════════╦═══════════╦═══════════╦══════════╦══════════╗${NC}"
+    echo -e "${BGRN}║${NC} # ${BGRN}║${NC} Package Name               ${BGRN}║${NC} USERNAME  ${BGRN}║${NC} GAME      ${BGRN}║${NC} BOT      ${BGRN}║${NC} REJOIN   ${BGRN}║${NC}"
+    echo -e "${BGRN}╠═══╬═══════════════════════════╬═══════════╬═══════════╬══════════╬══════════╣${NC}"
+
+    if [ -z "$cfgs" ]; then
+        echo -e "${BGRN}║${NC}  ${RED}Chưa có acc nào! Chạy [1] Setup trước.${NC}                                 ${BGRN}║${NC}"
+    else
+        local idx=1
+        for cfg in $cfgs; do
+            [ -f "$cfg" ] || continue
+            # Đọc package từ config
+            local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
+            [ -z "$pkg" ] && continue
+            total_acc=$((total_acc+1))
+
+            # Username
+            local uname; uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
+            uname="${uname:-N/A}"
+            uname="${uname:0:10}"
+
+            # Trạng thái game
+            local game_s="${RED}OFFLINE   ${NC}"
+            echo "$ps_out" | grep -q "$pkg" && { game_s="${BGRN}● ONLINE  ${NC}"; total_online=$((total_online+1)); }
+
+            # Trạng thái bot tmux
+            local win_name="${pkg//./_}"
+            local bot_s="${RED}STOPPED ${NC}"
+            echo "$tmux_wins" | grep -q "$win_name" && bot_s="${GRN}RUNNING ${NC}"
+
+            # Số lần rejoin
+            local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
+
+            # Tên rút gọn
+            local short_pkg="${pkg:0:27}"
+
+            printf "${BGRN}║${NC} %-2s${BGRN}║${NC} %-27s ${BGRN}║${NC} %-9s ${BGRN}║${NC} " \
+                "$idx" "$short_pkg" "$uname"
+            echo -en "$game_s"
+            printf "${BGRN}║${NC} "
+            echo -en "$bot_s"
+            printf "${BGRN}║${NC} %-8s ${BGRN}║${NC}\n" "$rj_cnt lần"
+            idx=$((idx+1))
+        done
+    fi
+
+    echo -e "${BGRN}╚═══╩═══════════════════════════╩═══════════╩═══════════╩══════════╩══════════╝${NC}"
+    echo -e " ${GRN}Tổng:${NC} ${BGRN}$total_online${NC}/${total_acc} acc ONLINE"
+}
+
+# ══════════════════════════════════════════════════════════
+#  MENU: Header
+# ══════════════════════════════════════════════════════════
+draw_header() {
+    local time_now; time_now=$(date '+%H:%M:%S %d/%m/%Y')
+    echo -e "${BGRN}"
+    echo "  ██████╗  ██████╗ ██████╗ ██╗      ██████╗ ██╗  ██╗"
+    echo "  ██╔══██╗██╔═══██╗██╔══██╗██║     ██╔═══██╗╚██╗██╔╝"
+    echo "  ██████╔╝██║   ██║██████╔╝██║     ██║   ██║ ╚███╔╝ "
+    echo "  ██╔══██╗██║   ██║██╔══██╗██║     ██║   ██║ ██╔██╗ "
+    echo "  ██║  ██║╚██████╔╝██████╔╝███████╗╚██████╔╝██╔╝ ██╗"
+    echo "  ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝"
+    echo -e "${NC}"
+    echo -e "  ${BGRN}AUTO REJOIN MULTI-CLONE BOT v3.1${NC}  ${CYN}│${NC}  ${YLW}$time_now${NC}"
+    echo -e "  ${GRN}Executor: ${WHT}$([ -n "$EXECUTOR" ] && echo "$EXECUTOR" || detect_executor)${NC}   ${GRN}PlaceID: ${WHT}$PLACE_ID${NC}   ${GRN}Private: ${WHT}${PRIVATE_CODE:-Không}${NC}"
+}
+
+# ══════════════════════════════════════════════════════════
+#  MENU: Xem chi tiết từng acc clone
+# ══════════════════════════════════════════════════════════
+view_clone_detail() {
+    local cfgs; cfgs=$(get_all_configs)
+    local arr=()
+    for cfg in $cfgs; do [ -f "$cfg" ] && arr+=("$cfg"); done
+
     clear
-    echo -e "${CYAN}====================================================${NC}"
-    echo -e "${GREEN}       BẢNG GIÁM SÁT TRẠNG THÁI ROBLOX CLONES       ${NC}"
-    echo -e "${CYAN}====================================================${NC}"
-    
-    local config_files=$(ls config_com*.cfg 2>/dev/null)
-    if [ -z "$config_files" ]; then
-        config_files="config.cfg"
+    echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║          CHỌN ACC ĐỂ XEM CHI TIẾT          ║${NC}"
+    echo -e "${BGRN}╠══════════════════════════════════════════════╣${NC}"
+
+    if [ ${#arr[@]} -eq 0 ]; then
+        echo -e "${BGRN}║${NC}  ${RED}Chưa có acc nào được cài đặt!${NC}                ${BGRN}║${NC}"
+        echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
+        echo -ne "\n${WHT}Nhấn Enter để quay lại...${NC}"; read -r; return
     fi
-    
-    local ps_info
-    ps_info=$(run_cmd "ps -A")
-    if [ -z "$ps_info" ]; then
-        ps_info=$(run_cmd "ps")
+
+    local i=1
+    for cfg in "${arr[@]}"; do
+        local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
+        local uname; uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
+        printf "${BGRN}║${NC} ${YLW}[%2d]${NC} %-38s ${BGRN}║${NC}\n" "$i" "${uname:-N/A} → ${pkg:0:25}"
+        i=$((i+1))
+    done
+    echo -e "${BGRN}║${NC}  ${CYN}[0]${NC}  Quay lại Menu                           ${BGRN}║${NC}"
+    echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
+    echo -ne "\n${WHT}  ➤ Chọn số acc [0-$((i-1))]: ${NC}"
+    read -r sel
+
+    [ "$sel" = "0" ] || [ -z "$sel" ] && return
+    local idx=$((sel - 1))
+    local chosen="${arr[$idx]}"
+    [ -z "$chosen" ] && { echo -e "${RED}Số không hợp lệ!${NC}"; sleep 1; return; }
+
+    # Xem chi tiết acc đã chọn
+    local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$chosen" | cut -d'"' -f2)
+    local uname; uname=$(grep '^ROBLOX_USERNAME=' "$chosen" 2>/dev/null | cut -d'"' -f2)
+    local place; place=$(grep '^PLACE_ID=' "$chosen" | cut -d'"' -f2)
+    local log_file="roblox_${pkg}.log"
+    local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
+
+    local ps_out; ps_out=$(run_cmd "ps -A" 2>/dev/null)
+    [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+    local game_s="${RED}OFFLINE${NC}"
+    echo "$ps_out" | grep -q "$pkg" && game_s="${BGRN}● ONLINE${NC}"
+
+    local win_name="${pkg//./_}"
+    local bot_s="${RED}STOPPED${NC}"
+    tmux list-windows -t roblox-multi 2>/dev/null | grep -q "$win_name" && bot_s="${GRN}RUNNING${NC}"
+
+    clear
+    echo -e "${BGRN}╔═══════════════════════════════════════════════════╗${NC}"
+    printf  "${BGRN}║${NC}  ${WHT}CHI TIẾT ACC #%-2s                               ${BGRN}║${NC}\n" "$sel"
+    echo -e "${BGRN}╠═══════════════════════════════════════════════════╣${NC}"
+    printf  "${BGRN}║${NC}  Username  : ${YLW}%-38s${NC}${BGRN}║${NC}\n" "${uname:-Chưa đặt}"
+    printf  "${BGRN}║${NC}  Package   : ${CYN}%-38s${NC}${BGRN}║${NC}\n" "$pkg"
+    printf  "${BGRN}║${NC}  Place ID  : ${GRN}%-38s${NC}${BGRN}║${NC}\n" "$place"
+    echo -e "${BGRN}╠═══════════════════════════════════════════════════╣${NC}"
+    printf  "${BGRN}║${NC}  Game      : %-4b                                  ${BGRN}║${NC}\n" "$game_s"
+    printf  "${BGRN}║${NC}  Bot       : %-4b                                  ${BGRN}║${NC}\n" "$bot_s"
+    printf  "${BGRN}║${NC}  Rejoin    : ${YLW}%s lần${NC}                              ${BGRN}║${NC}\n" "$rj_cnt"
+    echo -e "${BGRN}╠═══════════════════════════════════════════════════╣${NC}"
+    echo -e "${BGRN}║${NC}  ${WHT}LOG GẦN ĐÂY (10 dòng):${NC}                         ${BGRN}║${NC}"
+    if [ -f "$log_file" ]; then
+        tail -n 10 "$log_file" | while IFS= read -r line; do
+            printf "${BGRN}║${NC}  ${CYN}%-49s${NC}${BGRN}║${NC}\n" "${line:0:49}"
+        done
+    else
+        echo -e "${BGRN}║${NC}  ${YLW}Chưa có log.${NC}                                   ${BGRN}║${NC}"
     fi
-    
-    for cfg in $config_files; do
-        if [ -f "$cfg" ]; then
-            local tmp_pkg=""
-            local tmp_place=""
-            source "$cfg" >/dev/null 2>&1
-            tmp_pkg="$ROBLOX_PACKAGE"
-            tmp_place="$PLACE_ID"
-            
-            if [ -z "$tmp_pkg" ]; then
-                continue
+    echo -e "${BGRN}╠═══════════════════════════════════════════════════╣${NC}"
+    echo -e "${BGRN}║${NC}  ${GRN}[1]${NC} Đặt username  ${GRN}[2]${NC} Dừng acc này  ${GRN}[0]${NC} Quay lại ${BGRN}║${NC}"
+    echo -e "${BGRN}╚═══════════════════════════════════════════════════╝${NC}"
+    echo -ne "\n${WHT}  ➤ Chọn [0-2]: ${NC}"
+    read -r act
+    case "$act" in
+        1)
+            echo -ne "${WHT}  Nhập username Roblox cho acc này: ${NC}"
+            read -r new_uname
+            if [ -n "$new_uname" ]; then
+                if grep -q '^ROBLOX_USERNAME=' "$chosen" 2>/dev/null; then
+                    sed -i "s/^ROBLOX_USERNAME=.*/ROBLOX_USERNAME=\"$new_uname\"/" "$chosen"
+                else
+                    echo "ROBLOX_USERNAME=\"$new_uname\"" >> "$chosen"
+                fi
+                echo -e "${GRN}  ✓ Đã lưu username!${NC}"
+                sleep 1
             fi
-            
-            local window_name="${tmp_pkg//./_}"
-            local is_in_tmux="${RED}🔴 Tắt${NC}"
-            if tmux list-windows -t roblox-multi 2>/dev/null | grep -q "$window_name"; then
-                is_in_tmux="${GREEN}🟢 Chạy ngầm (tmux)${NC}"
-            fi
-            
-            local run_status="${RED}[🔴 OFFLINE - Game đã đóng]${NC}"
-            if echo "$ps_info" | grep -q "$tmp_pkg"; then
-                run_status="${GREEN}[🟢 ONLINE - Đang mở]${NC}"
-            fi
-            
-            local log_file="roblox_${tmp_pkg}.log"
-            local last_log="Chưa có lịch sử hoạt động"
-            if [ -f "$log_file" ]; then
-                last_log=$(tail -n 1 "$log_file" 2>/dev/null | cut -c 1-60)
-            fi
-            
-            echo -e "👉 Bản Clone: ${YELLOW}${window_name}${NC}"
-            echo -e "   Trạng thái App: $run_status"
-            echo -e "   Trình giám sát: $is_in_tmux"
-            echo -e "   Log cuối: ${CYAN}${last_log}${NC}"
-            echo -e "----------------------------------------------------"
-        fi
+            ;;
+        2)
+            run_cmd "am force-stop $pkg" > /dev/null 2>&1
+            tmux send-keys -t "roblox-multi:${win_name}" "q" 2>/dev/null
+            echo -e "${RED}  ✓ Đã dừng acc $pkg${NC}"
+            beep_warn
+            sleep 1.5
+            ;;
+    esac
+}
+
+# ══════════════════════════════════════════════════════════
+#  MENU CHÍNH
+# ══════════════════════════════════════════════════════════
+show_menu() {
+    load_config
+    init_executor
+    clear
+    draw_header
+    echo ""
+    draw_main_status
+    echo ""
+    echo -e "${BGRN}╔══════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║                  MENU ĐIỀU KHIỂN                   ║${NC}"
+    echo -e "${BGRN}╠══════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BGRN}║${NC}  ${GRN}[1]${NC} Khởi động / Setup tất cả Bot               ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${GRN}[2]${NC} Xem các tab đang chạy (tmux)               ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${GRN}[3]${NC} Xem chi tiết từng acc / Đặt username       ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${YLW}[4]${NC} Đổi Place ID / Private Server Code         ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${YLW}[5]${NC} Cài đặt Anti-AFK & Auto Restart            ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${YLW}[6]${NC} Đổi Discord Webhook                        ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${CYN}[7]${NC} Xem Log của acc                            ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${CYN}[8]${NC} Reset thống kê số lần Rejoin               ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${CYN}[9]${NC} Làm mới màn hình                           ${BGRN}║${NC}"
+    echo -e "${BGRN}║${NC}  ${RED}[0]${NC} Dừng tất cả Bot & Thoát                   ${BGRN}║${NC}"
+    echo -e "${BGRN}╚══════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -ne "${WHT}  ➤ Chọn [0-9]: ${NC}"
+}
+
+# ── Action: Khởi động ─────────────────────────────────────
+action_start_all() {
+    clear
+    echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║          KHỞI ĐỘNG TẤT CẢ BOT               ║${NC}"
+    echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
+    if [ -f "./setup.sh" ]; then
+        bash ./setup.sh "$PLACE_ID" "$PRIVATE_CODE"
+    else
+        echo -e "${RED}[ERROR] Không tìm thấy setup.sh!${NC}"
+        echo "Đảm bảo setup.sh nằm cùng thư mục với auto_rejoin.sh"
+        sleep 2
+    fi
+    echo -ne "\n${WHT}Nhấn Enter để quay lại...${NC}"; read -r
+}
+
+# ── Action: Attach tmux ───────────────────────────────────
+action_attach_tmux() {
+    if tmux has-session -t roblox-multi 2>/dev/null; then
+        echo -e "${GRN}Đang mở giao diện tmux...${NC}"
+        echo -e "${YLW}[TIP] Ctrl+B → D: thoát, giữ bot chạy ngầm${NC}"
+        echo -e "${YLW}[TIP] Ctrl+B → 0/1/2...: chuyển tab acc${NC}"
+        sleep 1.5
+        tmux attach-session -t roblox-multi
+    else
+        echo -e "${RED}Chưa có phiên tmux nào! Chọn [1] để khởi động trước.${NC}"
+        sleep 2
+    fi
+}
+
+# ── Action: Đổi game ──────────────────────────────────────
+action_change_game() {
+    clear
+    echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║         CÀI ĐẶT GAME                    ║${NC}"
+    echo -e "${BGRN}╠══════════════════════════════════════════╣${NC}"
+    printf  "${BGRN}║${NC}  Place ID hiện tại : ${YLW}%-20s${NC}${BGRN}║${NC}\n" "$PLACE_ID"
+    printf  "${BGRN}║${NC}  Private Code      : ${YLW}%-20s${NC}${BGRN}║${NC}\n" "${PRIVATE_CODE:-Trống (Public)}"
+    echo -e "${BGRN}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -ne "${WHT}  Nhập Place ID mới (Enter giữ nguyên '$PLACE_ID'): ${NC}"
+    read -r v; [ -n "$v" ] && PLACE_ID="$v"
+    echo -ne "${WHT}  Nhập Private Code (Enter giữ, 'none' để xóa): ${NC}"
+    read -r v
+    [ "$v" = "none" ] && PRIVATE_CODE="" || { [ -n "$v" ] && PRIVATE_CODE="$v"; }
+    save_config
+    echo -e "${GRN}  ✓ Đã lưu!${NC}"; sleep 1
+}
+
+# ── Action: Cài đặt nâng cao ──────────────────────────────
+action_advanced() {
+    clear
+    echo -e "${BGRN}╔═══════════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║          CÀI ĐẶT NÂNG CAO                    ║${NC}"
+    echo -e "${BGRN}╠═══════════════════════════════════════════════╣${NC}"
+    printf  "${BGRN}║${NC}  Anti-AFK       : ${YLW}%-28s${NC}${BGRN}║${NC}\n" "$ANTI_AFK"
+    printf  "${BGRN}║${NC}  Tap interval   : ${YLW}%-28s${NC}${BGRN}║${NC}\n" "${AFK_TAP_INTERVAL}s"
+    printf  "${BGRN}║${NC}  Tọa độ Tap     : ${YLW}X=${TAP_X} Y=${TAP_Y}                ${NC}${BGRN}║${NC}\n"
+    printf  "${BGRN}║${NC}  Auto-Restart   : ${YLW}%-28s${NC}${BGRN}║${NC}\n" "${AUTO_RESTART_PERIOD}s (0=tắt)"
+    printf  "${BGRN}║${NC}  Check interval : ${YLW}%-28s${NC}${BGRN}║${NC}\n" "${CHECK_INTERVAL}s"
+    echo -e "${BGRN}╚═══════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -ne "  Bật Anti-AFK? (true/false) [${ANTI_AFK}]: "; read -r v; [ -n "$v" ] && ANTI_AFK="$v"
+    echo -ne "  Tap mỗi bao nhiêu giây? [${AFK_TAP_INTERVAL}]: "; read -r v; [ -n "$v" ] && AFK_TAP_INTERVAL="$v"
+    echo -ne "  Tọa độ X của tap? [${TAP_X}]: "; read -r v; [ -n "$v" ] && TAP_X="$v"
+    echo -ne "  Tọa độ Y của tap? [${TAP_Y}]: "; read -r v; [ -n "$v" ] && TAP_Y="$v"
+    echo -ne "  Auto-Restart (giây, 0=tắt)? [${AUTO_RESTART_PERIOD}]: "; read -r v; [ -n "$v" ] && AUTO_RESTART_PERIOD="$v"
+    echo -ne "  Check interval (giây)? [${CHECK_INTERVAL}]: "; read -r v; [ -n "$v" ] && CHECK_INTERVAL="$v"
+    save_config
+    echo -e "${GRN}  ✓ Đã lưu!${NC}"; sleep 1
+}
+
+# ── Action: Đổi Discord Webhook ───────────────────────────
+action_discord() {
+    clear
+    echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║          DISCORD WEBHOOK                     ║${NC}"
+    echo -e "${BGRN}╠══════════════════════════════════════════════╣${NC}"
+    printf  "${BGRN}║${NC}  Webhook: ${YLW}%-36s${NC}${BGRN}║${NC}\n" "${DISCORD_WEBHOOK:-Chưa cài đặt}"
+    echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -ne "${WHT}  URL mới (Enter giữ, 'none' xóa): ${NC}"
+    read -r v
+    [ "$v" = "none" ] && DISCORD_WEBHOOK="" || { [ -n "$v" ] && DISCORD_WEBHOOK="$v"; }
+    save_config
+    echo -e "${GRN}  ✓ Đã lưu!${NC}"; sleep 1
+}
+
+# ── Action: Xem log ───────────────────────────────────────
+action_view_log() {
+    clear
+    echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${BGRN}║          XEM LOG TÀI KHOẢN                   ║${NC}"
+    echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
+    local logs; logs=$(ls roblox_*.log 2>/dev/null)
+    if [ -z "$logs" ]; then
+        echo -e "${RED}  Chưa có file log nào.${NC}"
+        echo -ne "\n${WHT}Nhấn Enter...${NC}"; read -r; return
+    fi
+    local arr=(); local i=1
+    for f in $logs; do
+        echo -e "  ${YLW}[$i]${NC} $f"
+        arr+=("$f"); i=$((i+1))
     done
     echo ""
-    echo -e "Bấm phím bất kỳ để ${YELLOW}TẢI LẠI TRẠNG THÁI${NC}, hoặc gõ '${RED}q${NC}' để quay lại Menu."
-    read -n 1 -r key
-    if [ "$key" != "q" ] && [ "$key" != "Q" ]; then
-        show_status_monitor
+    echo -ne "${WHT}  Chọn số file (Enter = 1): ${NC}"
+    read -r sel; sel="${sel:-1}"
+    local chosen="${arr[$((sel-1))]}"
+    [ -z "$chosen" ] || [ ! -f "$chosen" ] && { echo -e "${RED}Không hợp lệ!${NC}"; sleep 1; return; }
+    clear
+    echo -e "${BGRN}════ LOG: $chosen (50 dòng cuối) ════${NC}"
+    tail -n 50 "$chosen"
+    echo ""
+    echo -ne "${WHT}Nhấn Enter để quay lại...${NC}"; read -r
+}
+
+# ── Action: Reset stats ───────────────────────────────────
+action_reset_stats() {
+    echo -ne "${YLW}  Xác nhận reset thống kê rejoin? (y/N): ${NC}"
+    read -r c
+    if [ "$c" = "y" ] || [ "$c" = "Y" ]; then
+        rm -f "$STATS_FILE"
+        echo -e "${GRN}  ✓ Đã reset thống kê!${NC}"
+        beep_ok
+        sleep 1
     fi
 }
 
-# Giao diện MENU điều khiển rút gọn chống lỗi tràn dòng
-menu() {
-    load_config
-    while true; do
-        clear
-        echo -e "${CYAN}==========================================${NC}"
-        echo -e "${GREEN}      ROBLOX AUTO REJOIN CONTROL PANEL    ${NC}"
-        echo -e "${CYAN}==========================================${NC}"
-        echo -e " 1. ${GREEN}Xem trạng thái các bản Clone (MONITOR)${NC}"
-        echo -e " 2. Khởi động lại tất cả Acc (Restart All)"
-        echo -e " 3. ${RED}Dừng tất cả Acc chạy ngầm (Stop All)${NC}"
-        echo -e " 4. Xem Log chi tiết của từng Acc"
-        echo -e " 5. Đổi Place ID Game ${YELLOW}(Hiện tại: $PLACE_ID)${NC}"
-        echo -e " 6. Đổi Code Server riêng ${YELLOW}(Hiện tại: $PRIVATE_CODE)${NC}"
-        echo -e " 7. Thoát"
-        echo -e "${CYAN}==========================================${NC}"
-        echo -n "Chọn (1-7): "
-        read opt
-        
-        case $opt in
-            1)
-                show_status_monitor
-                ;;
-            2)
-                echo "[*] Đang khởi động lại toàn bộ bot..."
-                ./setup.sh "$PLACE_ID" "$PRIVATE_CODE"
-                sleep 2
-                ;;
-            3)
-                echo -e "${RED}[*] Đang dừng tất cả tiến trình chạy ngầm...${NC}"
-                tmux kill-session -t roblox-multi 2>/dev/null
-                # Force close tất cả app roblox
-                local config_files=$(ls config_com*.cfg 2>/dev/null)
-                for cfg in $config_files; do
-                    if [ -f "$cfg" ]; then
-                        local tmp_pkg=""
-                        source "$cfg" >/dev/null 2>&1
-                        if [ -n "$ROBLOX_PACKAGE" ]; then
-                            run_cmd "am force-stop $ROBLOX_PACKAGE"
-                        fi
-                    fi
-                done
-                echo "Đã dừng và tắt tất cả game."
-                sleep 2
-                ;;
-            4)
-                clear
-                echo "---- CÁC FILE LOG HIỆN CÓ ----"
-                ls roblox_*.log 2>/dev/null || echo "Không tìm thấy file log nào."
-                echo -n "Nhập tên file log muốn xem (Ví dụ: roblox_com.roblox.client1.log): "
-                read log_select
-                if [ -f "$log_select" ]; then
-                    clear
-                    echo "---- LỊCH SỬ HOẠT ĐỘNG: $log_select (Bấm q để thoát) ----"
-                    tail -n 50 "$log_select"
-                    echo "Nhấn Enter để quay lại..."
-                    read
-                else
-                    echo "File log không tồn tại!"
-                    sleep 1.5
-                fi
-                ;;
-            5)
-                echo -n "Nhập Place ID Game mới: "
-                read PLACE_ID
-                save_config
-                ;;
-            6)
-                echo -n "Nhập Code Private Server mới: "
-                read PRIVATE_CODE
-                save_config
-                ;;
-            7)
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}Lựa chọn không hợp lệ!${NC}"
-                sleep 1
-                ;;
-        esac
+# ── Action: Dừng tất cả ───────────────────────────────────
+action_stop_all() {
+    clear
+    echo -e "${RED}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║     DỪNG TẤT CẢ BOT VÀ GAME            ║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
+    tmux kill-session -t roblox-multi 2>/dev/null \
+        && echo -e "${GRN}  ✓ Đã tắt tmux session${NC}" \
+        || echo -e "${YLW}  ⚠ Không có session đang chạy${NC}"
+
+    for cfg in $(get_all_configs); do
+        [ -f "$cfg" ] || continue
+        local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
+        [ -z "$pkg" ] && continue
+        run_cmd "am force-stop $pkg" > /dev/null 2>&1
+        echo -e "${RED}  ✓ Dừng: $pkg${NC}"
     done
+
+    beep_warn
+    echo ""
+    echo -e "${GRN}  Đã dừng toàn bộ hệ thống.${NC}"
+    echo -ne "${WHT}Nhấn Enter để thoát...${NC}"; read -r
+    exit 0
 }
 
-# Kiểm tra đối số chạy trực tiếp không qua menu (chế độ chạy ngầm)
+# ══════════════════════════════════════════════════════════
+#  ENTRY POINT
+# ══════════════════════════════════════════════════════════
 if [ "$1" = "--run" ]; then
     start_bot
 else
-    menu
+    load_config
+    while true; do
+        show_menu
+        read -r choice
+        case "$choice" in
+            1) action_start_all ;;
+            2) action_attach_tmux ;;
+            3) view_clone_detail ;;
+            4) action_change_game ;;
+            5) action_advanced ;;
+            6) action_discord ;;
+            7) action_view_log ;;
+            8) action_reset_stats ;;
+            9) ;; # loop lại = refresh
+            0) action_stop_all ;;
+            *) echo -e "${RED}  Lựa chọn không hợp lệ!${NC}"; sleep 0.7 ;;
+        esac
+    done
 fi
-
