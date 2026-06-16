@@ -225,14 +225,32 @@ launch_roblox() {
         link="roblox://experiences/start?placeId=${PLACE_ID}"
     fi
 
-    # Cách 1: am start với deep link (chỉ định package)
-    run_cmd "am start -a android.intent.action.VIEW -d \"$link\" -p $pkg" > /dev/null 2>&1
+    # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
+    am start -a android.intent.action.VIEW -d "$link" -p "$pkg" > /dev/null 2>&1
     local ret=$?
-    # Cách 2: am start không chỉ định package
-    [ $ret -ne 0 ] && run_cmd "am start -a android.intent.action.VIEW -d \"$link\"" > /dev/null 2>&1 && ret=$?
-    # Cách 3: Mở thẳng MainActivity
+
+    # 2. Nếu thất bại, thử chạy qua run_cmd (su/adb) kèm theo --user 0
     if [ $ret -ne 0 ]; then
-        run_cmd "am start -n $pkg/.MainActivity" > /dev/null 2>&1 ||
+        run_cmd "am start --user 0 -a android.intent.action.VIEW -d \"$link\" -p $pkg" > /dev/null 2>&1
+        ret=$?
+    fi
+
+    # 3. Cách 2: am start không chỉ định package (quyền Termux user)
+    if [ $ret -ne 0 ]; then
+        am start -a android.intent.action.VIEW -d "$link" > /dev/null 2>&1
+        ret=$?
+    fi
+
+    # 4. Cách 2 (su/adb): am start không chỉ định package kèm theo --user 0
+    if [ $ret -ne 0 ]; then
+        run_cmd "am start --user 0 -a android.intent.action.VIEW -d \"$link\"" > /dev/null 2>&1
+        ret=$?
+    fi
+
+    # 5. Cách 3: Mở thẳng MainActivity
+    if [ $ret -ne 0 ]; then
+        am start -n "$pkg/.MainActivity" > /dev/null 2>&1 ||
+        run_cmd "am start --user 0 -n $pkg/.MainActivity" > /dev/null 2>&1 ||
         run_cmd "monkey -p $pkg 1" > /dev/null 2>&1
     fi
 
@@ -356,24 +374,33 @@ check_roblox_log_for_disconnect() {
     local pkg="$ROBLOX_PACKAGE"
     local log_dir=""
 
-    if run_cmd "[ -d /sdcard/Android/data/$pkg/files/logs ]" 2>/dev/null; then
+    # Sử dụng ls -d để kiểm tra sự tồn tại của thư mục (tránh lỗi mã thoát su -c trên một số dòng máy)
+    if [ -n "$(run_cmd "ls -d /sdcard/Android/data/$pkg/files/logs 2>/dev/null" | tr -d '\r\n')" ]; then
         log_dir="/sdcard/Android/data/$pkg/files/logs"
-    elif run_cmd "[ -d /data/data/$pkg/files/logs ]" 2>/dev/null; then
+    elif [ -n "$(run_cmd "ls -d /data/data/$pkg/files/logs 2>/dev/null" | tr -d '\r\n')" ]; then
         log_dir="/data/data/$pkg/files/logs"
     fi
 
     [ -z "$log_dir" ] && return 1
 
     local latest_log
-    latest_log=$(run_cmd "ls -t $log_dir 2>/dev/null | head -n 1" 2>/dev/null)
+    latest_log=$(run_cmd "ls -t $log_dir 2>/dev/null | head -n 1" 2>/dev/null | tr -d '\r\n')
     [ -z "$latest_log" ] && return 1
 
+    # Kiểm tra thời gian sửa đổi của log file để tránh nhận nhầm log của phiên chơi cũ trước đó
+    local mtime
+    mtime=$(run_cmd "stat -c %Y $log_dir/$latest_log 2>/dev/null || stat -f %m $log_dir/$latest_log 2>/dev/null" | tr -d '\r\n')
+    if [ -n "$mtime" ] && [ "$mtime" -lt "${LAST_LAUNCH:-0}" ]; then
+        # File log chưa được cập nhật cho phiên chơi mới, bỏ qua
+        return 1
+    fi
+
     local log_tail
-    log_tail=$(run_cmd "tail -n 30 $log_dir/$latest_log" 2>/dev/null)
+    log_tail=$(run_cmd "tail -n 150 $log_dir/$latest_log" 2>/dev/null)
     [ -z "$log_tail" ] && return 1
 
-    # Tìm kiếm các từ khoá chỉ thị ngắt kết nối / bị kick ở cuối tệp tin log
-    if echo "$log_tail" | grep -qi "connection lost\|disconnect\|kick\|save data didn't load\|error code\|game closed\|lost connection"; then
+    # Sử dụng grep -E -i (Extended Regex) tương thích tuyệt đối với Toybox/Busybox của Android
+    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|kick|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account"; then
         return 0
     fi
 
