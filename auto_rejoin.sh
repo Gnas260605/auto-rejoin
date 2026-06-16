@@ -9,6 +9,10 @@ CONFIG_FILE="${CONFIG_FILE:-config.cfg}"
 LOG_FILE="${LOG_FILE:-roblox_bot.log}"
 STATS_FILE="${STATS_FILE:-roblox_stats.dat}"   # lưu số lần rejoin
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+TMP_DIR="${SCRIPT_DIR}/tmp"
+mkdir -p "$TMP_DIR"
+
 # ── Biến toàn cục cho bot loop ──────────────────────────
 LAST_RESTART=0
 LAST_AFK_TAP=0
@@ -256,9 +260,9 @@ is_roblox_running() {
 
     # 1. Thử dùng file status dùng chung (nếu mới và tồn tại) để tránh gọi dumpsys trực tiếp
     local use_shared=false
-    if [ -f "/tmp/roblox_activities.txt" ]; then
+    if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
         local mtime
-        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
         local now; now=$(date +%s)
         if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
             use_shared=true
@@ -266,9 +270,9 @@ is_roblox_running() {
     fi
 
     if [ "$use_shared" = "true" ]; then
-        grep -q "$pkg" /tmp/roblox_activities.txt && return 0
-        if [ -f "/tmp/roblox_windows.txt" ]; then
-            grep -q "$pkg" /tmp/roblox_windows.txt && return 0
+        grep -q "$pkg" "${TMP_DIR}/roblox_activities.txt" && return 0
+        if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
+            grep -q "$pkg" "${TMP_DIR}/roblox_windows.txt" && return 0
         fi
         # Fallback check nhanh không cần dumpsys
         run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
@@ -314,9 +318,9 @@ is_in_game() {
 
     # 1. Thử dùng file status dùng chung (nếu mới và tồn tại) để tránh gọi dumpsys trực tiếp
     local use_shared=false
-    if [ -f "/tmp/roblox_activities.txt" ]; then
+    if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
         local mtime
-        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
         local now; now=$(date +%s)
         if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
             use_shared=true
@@ -324,9 +328,9 @@ is_in_game() {
     fi
 
     if [ "$use_shared" = "true" ]; then
-        grep -i "$pkg" /tmp/roblox_activities.txt | grep -qi "GameActivity" && return 0
-        if [ -f "/tmp/roblox_windows.txt" ]; then
-            grep -i "$pkg" /tmp/roblox_windows.txt | grep -qi "GameActivity" && return 0
+        grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qi "GameActivity" && return 0
+        if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
+            grep -i "$pkg" "${TMP_DIR}/roblox_windows.txt" | grep -qi "GameActivity" && return 0
         fi
         return 1
     fi
@@ -383,7 +387,7 @@ start_bot() {
     load_config
     init_executor
     local win_name="${ROBLOX_PACKAGE//./_}"
-    local pid_file="/tmp/roblox_bot_${win_name}.pid"
+    local pid_file="${TMP_DIR}/roblox_bot_${win_name}.pid"
     echo "$$" > "$pid_file"
     trap 'rm -f "$pid_file"' EXIT INT TERM
 
@@ -557,16 +561,16 @@ draw_main_status() {
     # Đọc kết quả dumpsys từ file status dùng chung (nếu mới và tồn tại) để tránh lag
     local dump_act=""
     local use_shared=false
-    if [ -f "/tmp/roblox_activities.txt" ]; then
+    if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
         local mtime
-        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
         local now; now=$(date +%s)
         if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
             use_shared=true
         fi
     fi
     if [ "$use_shared" = "true" ]; then
-        dump_act=$(cat /tmp/roblox_activities.txt 2>/dev/null)
+        dump_act=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
     else
         dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null < /dev/null)
     fi
@@ -686,16 +690,16 @@ view_clone_detail() {
 
     local ps_out=""
     local use_shared=false
-    if [ -f "/tmp/roblox_activities.txt" ]; then
+    if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
         local mtime
-        mtime=$(stat -c %Y /tmp/roblox_activities.txt 2>/dev/null || stat -f %m /tmp/roblox_activities.txt 2>/dev/null)
+        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
         local now; now=$(date +%s)
         if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
             use_shared=true
         fi
     fi
     if [ "$use_shared" = "true" ]; then
-        ps_out=$(cat /tmp/roblox_activities.txt 2>/dev/null)
+        ps_out=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
     else
         ps_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
     fi

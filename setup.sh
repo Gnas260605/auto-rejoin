@@ -4,6 +4,10 @@
 # ║      Cách dùng: bash setup.sh [PlaceID] [Code]      ║
 # ╚══════════════════════════════════════════════════════╝
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+TMP_DIR="${SCRIPT_DIR}/tmp"
+mkdir -p "$TMP_DIR"
+
 BGRN='\033[1;32m'
 GRN='\033[0;32m'
 RED='\033[0;31m'
@@ -303,12 +307,14 @@ for PKG in $PACKAGES; do
 done
 
 # Ghi script watchdog vào file tạm rồi chạy
-cat > /tmp/watchdog_roblox.sh << 'WDEOF'
+cat > "${TMP_DIR}/watchdog_roblox.sh" << 'WDEOF'
 #!/bin/bash
 BGRN='\033[1;32m'; GRN='\033[0;32m'; RED='\033[0;31m'; YLW='\033[0;33m'; CYN='\033[0;36m'; NC='\033[0m'
 ALL_CFGS="$1"   # Danh sách "cfg:pkg:log" cách nhau bằng space
 EXECUTOR="$2"   # Kiểu thực thi (su, adb, direct)
 PROJECT_DIR="$3" # Thư mục dự án
+TMP_DIR="${PROJECT_DIR}/tmp"
+mkdir -p "$TMP_DIR"
 
 run_cmd() {
     case "$EXECUTOR" in
@@ -329,14 +335,14 @@ while true; do
     echo -e "${CYN}[$TS]${NC} Đang cập nhật status cache & kiểm tra ${YLW}$(echo $ALL_CFGS | wc -w)${NC} bot..."
 
     # 1. Cập nhật dumpsys dùng chung cho các bot (giảm tải tối đa cho CPU)
-    run_cmd "dumpsys activity activities" > /tmp/roblox_activities.tmp 2>/dev/null
-    if [ -s /tmp/roblox_activities.tmp ]; then
-        mv /tmp/roblox_activities.tmp /tmp/roblox_activities.txt
+    run_cmd "dumpsys activity activities" > "${TMP_DIR}/roblox_activities.tmp" 2>/dev/null
+    if [ -s "${TMP_DIR}/roblox_activities.tmp" ]; then
+        mv "${TMP_DIR}/roblox_activities.tmp" "${TMP_DIR}/roblox_activities.txt"
     fi
 
-    run_cmd "dumpsys window windows" > /tmp/roblox_windows.tmp 2>/dev/null
-    if [ -s /tmp/roblox_windows.tmp ]; then
-        mv /tmp/roblox_windows.tmp /tmp/roblox_windows.txt
+    run_cmd "dumpsys window windows" > "${TMP_DIR}/roblox_windows.tmp" 2>/dev/null
+    if [ -s "${TMP_DIR}/roblox_windows.tmp" ]; then
+        mv "${TMP_DIR}/roblox_windows.tmp" "${TMP_DIR}/roblox_windows.txt"
     fi
 
     # 2. Kiểm tra sống chết của từng bot
@@ -353,7 +359,7 @@ while true; do
         bot_running=false
         if [ -n "$WIN_PANE" ]; then
             pid=""
-            [ -f "/tmp/roblox_bot_${WIN}.pid" ] && pid=$(cat "/tmp/roblox_bot_${WIN}.pid" 2>/dev/null)
+            [ -f "${TMP_DIR}/roblox_bot_${WIN}.pid" ] && pid=$(cat "${TMP_DIR}/roblox_bot_${WIN}.pid" 2>/dev/null)
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
                 bot_running=true
             fi
@@ -378,10 +384,10 @@ while true; do
     sleep 15
 done
 WDEOF
-chmod +x /tmp/watchdog_roblox.sh
+chmod +x "${TMP_DIR}/watchdog_roblox.sh"
 
 tmux send-keys -t "roblox-multi:WATCHDOG" \
-    "bash /tmp/watchdog_roblox.sh '${ALL_CFGS_LINE}' '${EXECUTOR_TYPE}' '${PWD}'" C-m 2>/dev/null
+    "bash \"${TMP_DIR}/watchdog_roblox.sh\" '${ALL_CFGS_LINE}' '${EXECUTOR_TYPE}' '${PWD}'" C-m 2>/dev/null
 
 printf "${BGRN}║${NC}  ${BGRN}✓${NC} ${YLW}WATCHDOG${NC}: Giám sát toàn bộ ${YLW}$((COUNT-1))${NC} acc          ${BGRN}║${NC}\n"
 
