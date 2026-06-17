@@ -236,6 +236,11 @@ DEFAULT_ANTI_AFK=true
 DEFAULT_TAP_INTERVAL=180
 DEFAULT_TAP_X=540
 DEFAULT_TAP_Y=960
+DEFAULT_FREEFORM_LAYOUT=false
+DEFAULT_FREEFORM_WIDTH=540
+DEFAULT_FREEFORM_HEIGHT=960
+DEFAULT_FREEFORM_OFFSET_X=60
+DEFAULT_FREEFORM_OFFSET_Y=80
 
 if [ -f "config.cfg" ]; then
     DEFAULT_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' config.cfg | cut -d'"' -f2 2>/dev/null)
@@ -245,6 +250,11 @@ if [ -f "config.cfg" ]; then
     DEFAULT_TAP_INTERVAL=$(grep '^AFK_TAP_INTERVAL=' config.cfg | cut -d'=' -f2 2>/dev/null)
     DEFAULT_TAP_X=$(grep '^TAP_X=' config.cfg | cut -d'=' -f2 2>/dev/null)
     DEFAULT_TAP_Y=$(grep '^TAP_Y=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_FREEFORM_LAYOUT=$(grep '^FREEFORM_LAYOUT=' config.cfg | cut -d'"' -f2 2>/dev/null)
+    DEFAULT_FREEFORM_WIDTH=$(grep '^FREEFORM_WIDTH=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_FREEFORM_HEIGHT=$(grep '^FREEFORM_HEIGHT=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_FREEFORM_OFFSET_X=$(grep '^FREEFORM_OFFSET_X=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_FREEFORM_OFFSET_Y=$(grep '^FREEFORM_OFFSET_Y=' config.cfg | cut -d'=' -f2 2>/dev/null)
 fi
 
 echo -e "${BGRN}+------------------------------------------------------+${NC}"
@@ -265,6 +275,11 @@ for PKG in $PACKAGES; do
     EXISTING_TAP_INTERVAL=""
     EXISTING_TAP_X=""
     EXISTING_TAP_Y=""
+    EXISTING_FREEFORM_LAYOUT=""
+    EXISTING_FREEFORM_WIDTH=""
+    EXISTING_FREEFORM_HEIGHT=""
+    EXISTING_FREEFORM_OFFSET_X=""
+    EXISTING_FREEFORM_OFFSET_Y=""
 
     if [ -f "$CFG" ]; then
         EXISTING_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' "$CFG" | cut -d'"' -f2 2>/dev/null)
@@ -274,6 +289,11 @@ for PKG in $PACKAGES; do
         EXISTING_TAP_INTERVAL=$(grep '^AFK_TAP_INTERVAL=' "$CFG" | cut -d'=' -f2 2>/dev/null)
         EXISTING_TAP_X=$(grep '^TAP_X=' "$CFG" | cut -d'=' -f2 2>/dev/null)
         EXISTING_TAP_Y=$(grep '^TAP_Y=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_FREEFORM_LAYOUT=$(grep '^FREEFORM_LAYOUT=' "$CFG" | cut -d'"' -f2 2>/dev/null)
+        EXISTING_FREEFORM_WIDTH=$(grep '^FREEFORM_WIDTH=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_FREEFORM_HEIGHT=$(grep '^FREEFORM_HEIGHT=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_FREEFORM_OFFSET_X=$(grep '^FREEFORM_OFFSET_X=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_FREEFORM_OFFSET_Y=$(grep '^FREEFORM_OFFSET_Y=' "$CFG" | cut -d'=' -f2 2>/dev/null)
     fi
 
     # Lấy giá trị hiện tại (ưu tiên của account -> mặc định chung -> mặc định mặc định)
@@ -284,6 +304,11 @@ for PKG in $PACKAGES; do
     AFK_TAP_INTERVAL="${EXISTING_TAP_INTERVAL:-${DEFAULT_TAP_INTERVAL:-180}}"
     TAP_X="${EXISTING_TAP_X:-${DEFAULT_TAP_X:-540}}"
     TAP_Y="${EXISTING_TAP_Y:-${DEFAULT_TAP_Y:-960}}"
+    FREEFORM_LAYOUT="${EXISTING_FREEFORM_LAYOUT:-${DEFAULT_FREEFORM_LAYOUT:-false}}"
+    FREEFORM_WIDTH="${EXISTING_FREEFORM_WIDTH:-${DEFAULT_FREEFORM_WIDTH:-540}}"
+    FREEFORM_HEIGHT="${EXISTING_FREEFORM_HEIGHT:-${DEFAULT_FREEFORM_HEIGHT:-960}}"
+    FREEFORM_OFFSET_X="${EXISTING_FREEFORM_OFFSET_X:-${DEFAULT_FREEFORM_OFFSET_X:-60}}"
+    FREEFORM_OFFSET_Y="${EXISTING_FREEFORM_OFFSET_Y:-${DEFAULT_FREEFORM_OFFSET_Y:-80}}"
 
     cat > "$CFG" <<EOF
 PLACE_ID="$PLACE_ID"
@@ -297,6 +322,11 @@ TAP_X=$TAP_X
 TAP_Y=$TAP_Y
 DISCORD_WEBHOOK="$DISCORD_WEBHOOK"
 ROBLOX_USERNAME="${SAVED_USERNAME}"
+FREEFORM_LAYOUT="$FREEFORM_LAYOUT"
+FREEFORM_WIDTH=$FREEFORM_WIDTH
+FREEFORM_HEIGHT=$FREEFORM_HEIGHT
+FREEFORM_OFFSET_X=$FREEFORM_OFFSET_X
+FREEFORM_OFFSET_Y=$FREEFORM_OFFSET_Y
 EOF
 
     progress_bar $COUNT $TOTAL "Khởi động acc $COUNT/$TOTAL..."

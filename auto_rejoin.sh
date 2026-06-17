@@ -93,6 +93,11 @@ load_config() {
     TAP_X="${TAP_X:-540}"
     TAP_Y="${TAP_Y:-960}"
     DISCORD_WEBHOOK="${DISCORD_WEBHOOK:-}"
+    FREEFORM_LAYOUT="${FREEFORM_LAYOUT:-false}"
+    FREEFORM_WIDTH="${FREEFORM_WIDTH:-auto}"
+    FREEFORM_HEIGHT="${FREEFORM_HEIGHT:-auto}"
+    FREEFORM_OFFSET_X="${FREEFORM_OFFSET_X:-auto}"
+    FREEFORM_OFFSET_Y="${FREEFORM_OFFSET_Y:-auto}"
 }
 
 save_config() {
@@ -107,6 +112,11 @@ AFK_TAP_INTERVAL=$AFK_TAP_INTERVAL
 TAP_X=$TAP_X
 TAP_Y=$TAP_Y
 DISCORD_WEBHOOK="$DISCORD_WEBHOOK"
+FREEFORM_LAYOUT="$FREEFORM_LAYOUT"
+FREEFORM_WIDTH="$FREEFORM_WIDTH"
+FREEFORM_HEIGHT="$FREEFORM_HEIGHT"
+FREEFORM_OFFSET_X="$FREEFORM_OFFSET_X"
+FREEFORM_OFFSET_Y="$FREEFORM_OFFSET_Y"
 EOF
 }
 
@@ -240,6 +250,30 @@ scan_all_usernames() {
 
 
 # ── Mở Roblox vào game ───────────────────────────────────
+get_package_index() {
+    local target_pkg="$1"
+    local all_pkgs
+    # Đọc danh sách package từ các file config đang có và sort để lấy số thứ tự chuẩn
+    all_pkgs=$(ls config_com*.cfg 2>/dev/null | xargs -n 1 grep '^ROBLOX_PACKAGE=' 2>/dev/null | cut -d'"' -f2 | sort -u)
+    if [ -z "$all_pkgs" ]; then
+        [ -f "config.cfg" ] && all_pkgs=$(grep '^ROBLOX_PACKAGE=' config.cfg 2>/dev/null | cut -d'"' -f2)
+    fi
+    if [ -z "$all_pkgs" ]; then
+        all_pkgs=$(pm list packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r' | sort -u)
+    fi
+    [ -z "$all_pkgs" ] && all_pkgs="com.roblox.client"
+
+    local idx=0
+    for p in $all_pkgs; do
+        if [ "$p" = "$target_pkg" ]; then
+            echo "$idx"
+            return
+        fi
+        idx=$((idx+1))
+    done
+    echo "0"
+}
+
 launch_roblox() {
     local pkg="${ROBLOX_PACKAGE}"
     log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
@@ -250,32 +284,79 @@ launch_roblox() {
         link="roblox://experiences/start?placeId=${PLACE_ID}"
     fi
 
+    local freeform_args=""
+    if [ "$FREEFORM_LAYOUT" = "true" ]; then
+        # Đảm bảo bật freeform trong cài đặt hệ thống Android
+        run_cmd "settings put global enable_freeform_support 1" >/dev/null 2>&1
+        run_cmd "settings put secure force_resizable_activities 1" >/dev/null 2>&1
+        
+        local idx; idx=$(get_package_index "$pkg")
+        
+        # Đọc độ phân giải màn hình thực tế từ wm size
+        local size_str
+        size_str=$(run_cmd "wm size" 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
+        local screen_w=1080
+        local screen_h=1920
+        if [ -n "$size_str" ]; then
+            screen_w=$(echo "$size_str" | cut -d'x' -f1)
+            screen_h=$(echo "$size_str" | cut -d'x' -f2)
+        fi
+        
+        local w_val="${FREEFORM_WIDTH:-auto}"
+        local h_val="${FREEFORM_HEIGHT:-auto}"
+        local dx_val="${FREEFORM_OFFSET_X:-auto}"
+        local dy_val="${FREEFORM_OFFSET_Y:-auto}"
+        
+        local final_w final_h final_dx final_dy
+        
+        # Tự động tính toán dựa trên hướng màn hình (Ngang hay Dọc)
+        if [ "$screen_w" -gt "$screen_h" ]; then
+            # Màn hình Ngang (Landscape - máy tính bảng / UGPhone)
+            [ "$h_val" = "auto" ] || [ -z "$h_val" ] && final_h=$(( screen_h * 75 / 100 )) || final_h=$h_val
+            [ "$w_val" = "auto" ] || [ -z "$w_val" ] && final_w=$(( final_h * 9 / 16 )) || final_w=$w_val
+            [ "$dx_val" = "auto" ] || [ -z "$dx_val" ] && final_dx=$(( screen_w * 3 / 100 )) || final_dx=$dx_val
+            [ "$dy_val" = "auto" ] || [ -z "$dy_val" ] && final_dy=$(( screen_h * 6 / 100 )) || final_dy=$dy_val
+        else
+            # Màn hình Dọc (Portrait - điện thoại thông thường)
+            [ "$w_val" = "auto" ] || [ -z "$w_val" ] && final_w=$(( screen_w * 70 / 100 )) || final_w=$w_val
+            [ "$h_val" = "auto" ] || [ -z "$h_val" ] && final_h=$(( screen_h * 50 / 100 )) || final_h=$h_val
+            [ "$dx_val" = "auto" ] || [ -z "$dx_val" ] && final_dx=0 || final_dx=$dx_val
+            [ "$dy_val" = "auto" ] || [ -z "$dy_val" ] && final_dy=$(( screen_h * 5 / 100 )) || final_dy=$dy_val
+        fi
+        
+        local left=$(( idx * final_dx ))
+        local top=$(( idx * final_dy ))
+        local right=$(( left + final_w ))
+        local bottom=$(( top + final_h ))
+        freeform_args="--windowingMode 5 --launch-bounds $left,$top,$right,$bottom"
+    fi
+
     # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
-    am start -a android.intent.action.VIEW -d "$link" -p "$pkg" > /dev/null 2>&1
+    am start $freeform_args -a android.intent.action.VIEW -d "$link" -p "$pkg" > /dev/null 2>&1
     local ret=$?
 
     # 2. Nếu thất bại, thử chạy qua run_cmd (su/adb) kèm theo --user 0
     if [ $ret -ne 0 ]; then
-        run_cmd "am start --user 0 -a android.intent.action.VIEW -d \"$link\" -p $pkg" > /dev/null 2>&1
+        run_cmd "am start --user 0 $freeform_args -a android.intent.action.VIEW -d \"$link\" -p $pkg" > /dev/null 2>&1
         ret=$?
     fi
 
     # 3. Cách 2: am start không chỉ định package (quyền Termux user)
     if [ $ret -ne 0 ]; then
-        am start -a android.intent.action.VIEW -d "$link" > /dev/null 2>&1
+        am start $freeform_args -a android.intent.action.VIEW -d "$link" > /dev/null 2>&1
         ret=$?
     fi
 
     # 4. Cách 2 (su/adb): am start không chỉ định package kèm theo --user 0
     if [ $ret -ne 0 ]; then
-        run_cmd "am start --user 0 -a android.intent.action.VIEW -d \"$link\"" > /dev/null 2>&1
+        run_cmd "am start --user 0 $freeform_args -a android.intent.action.VIEW -d \"$link\"" > /dev/null 2>&1
         ret=$?
     fi
 
     # 5. Cách 3: Mở thẳng MainActivity
     if [ $ret -ne 0 ]; then
-        am start -n "$pkg/.MainActivity" > /dev/null 2>&1 ||
-        run_cmd "am start --user 0 -n $pkg/.MainActivity" > /dev/null 2>&1 ||
+        am start $freeform_args -n "$pkg/.MainActivity" > /dev/null 2>&1 ||
+        run_cmd "am start --user 0 $freeform_args -n $pkg/.MainActivity" > /dev/null 2>&1 ||
         run_cmd "monkey -p $pkg 1" > /dev/null 2>&1
     fi
 
@@ -637,7 +718,7 @@ draw_main_status() {
 
     # Chieu rong cot: #(3) | pkg(29) | user(10) | game(9) | bot(8) | rejoin(8)
     echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
-    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name                 ${BGRN}|${NC} USERNAME   ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
+    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name                ${BGRN}|${NC} USERNAME   ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
     echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
 
     if [ -z "$cfgs" ]; then
@@ -675,10 +756,10 @@ draw_main_status() {
 
             # So lan rejoin
             local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
-            local short_pkg="${pkg:0:29}"
+            local short_pkg="${pkg:0:27}"
 
             # In hang du lieu - tach ma ANSI ra khoi %-format de printf tinh dung chieu rong
-            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-29s ${BGRN}|${NC} %-10s ${BGRN}|${NC} " \
+            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-27s ${BGRN}|${NC} %-10s ${BGRN}|${NC} " \
                 "$idx" "$short_pkg" "$uname"
             printf "${game_color}%-9s${NC} ${BGRN}|${NC} ${bot_color}%-8s${NC} ${BGRN}|${NC} %-8s ${BGRN}|${NC}\n" \
                 "$game_text" "$bot_text" "${rj_cnt} lan"
@@ -920,6 +1001,9 @@ action_advanced() {
     printf  "${BGRN}║${NC}  Tọa độ Tap     : ${YLW}X=${TAP_X} Y=${TAP_Y}                ${NC}${BGRN}║${NC}\n"
     printf  "${BGRN}║${NC}  Auto-Restart   : ${YLW}%-28s${NC}${BGRN}║${NC}\n" "${AUTO_RESTART_PERIOD}s (0=tắt)"
     printf  "${BGRN}║${NC}  Check interval : ${YLW}%-28s${NC}${BGRN}║${NC}\n" "${CHECK_INTERVAL}s"
+    printf  "${BGRN}║${NC}  Freeform Layout: ${YLW}%-28s${NC}${BGRN}║${NC}\n" "$FREEFORM_LAYOUT"
+    printf  "${BGRN}║${NC}  Kích thước     : ${YLW}W=${FREEFORM_WIDTH} H=${FREEFORM_HEIGHT}             ${NC}${BGRN}║${NC}\n"
+    printf  "${BGRN}║${NC}  Lệch chồng (X,Y): ${YLW}dX=${FREEFORM_OFFSET_X} dY=${FREEFORM_OFFSET_Y}             ${NC}${BGRN}║${NC}\n"
     echo -e "${BGRN}╚═══════════════════════════════════════════════╝${NC}"
     echo ""
     echo -ne "  Bật Anti-AFK? (true/false) [${ANTI_AFK}]: "; read -r v; [ -n "$v" ] && ANTI_AFK="$v"
@@ -928,6 +1012,11 @@ action_advanced() {
     echo -ne "  Tọa độ Y của tap? [${TAP_Y}]: "; read -r v; [ -n "$v" ] && TAP_Y="$v"
     echo -ne "  Auto-Restart (giây, 0=tắt)? [${AUTO_RESTART_PERIOD}]: "; read -r v; [ -n "$v" ] && AUTO_RESTART_PERIOD="$v"
     echo -ne "  Check interval (giây)? [${CHECK_INTERVAL}]: "; read -r v; [ -n "$v" ] && CHECK_INTERVAL="$v"
+    echo -ne "  Bật Freeform xếp chồng? (true/false) [${FREEFORM_LAYOUT}]: "; read -r v; [ -n "$v" ] && FREEFORM_LAYOUT="$v"
+    echo -ne "  Độ rộng cửa sổ (W) [${FREEFORM_WIDTH}]: "; read -r v; [ -n "$v" ] && FREEFORM_WIDTH="$v"
+    echo -ne "  Chiều cao cửa sổ (H) [${FREEFORM_HEIGHT}]: "; read -r v; [ -n "$v" ] && FREEFORM_HEIGHT="$v"
+    echo -ne "  Khoảng lệch X (dX) [${FREEFORM_OFFSET_X}]: "; read -r v; [ -n "$v" ] && FREEFORM_OFFSET_X="$v"
+    echo -ne "  Khoảng lệch Y (dY) [${FREEFORM_OFFSET_Y}]: "; read -r v; [ -n "$v" ] && FREEFORM_OFFSET_Y="$v"
     save_config
     echo -e "${GRN}  ✓ Đã lưu!${NC}"; sleep 1
 }
