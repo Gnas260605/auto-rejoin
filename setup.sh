@@ -16,6 +16,25 @@ CYN='\033[0;36m'
 WHT='\033[1;37m'
 NC='\033[0m'
 
+# ── Chạy lệnh với timeout để tránh treo vĩnh viễn ───────
+run_with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout > /dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        "$@" &
+        local pid=$!
+        local i=0
+        while kill -0 "$pid" 2>/dev/null && [ $i -lt "$secs" ]; do
+            sleep 1; i=$((i+1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null; return 124
+        fi
+        wait "$pid" 2>/dev/null
+    fi
+}
+
 # ── Progress bar ─────────────────────────────────────────
 progress_bar() {
     local current=$1 total=$2 label="${3:-}"
@@ -55,82 +74,99 @@ fi
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# ── BƯỚC 1: Cập nhật hệ thống ───────────────────────────
+# ── BƯỚC 1 & 2: Kiểm tra và cài đặt gói thông minh ────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BGRN}║  [BƯỚC 1/5] Cập nhật hệ thống Termux            ║${NC}"
+echo -e "${BGRN}║  [BƯỚC 1/4] Kiểm tra & Cài đặt gói cần thiết   ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
-for i in 1 2 3 4 5; do
-    progress_bar $i 5 "Đang cập nhật..."
-    sleep 0.2
-done
-pkg update -y -o Dpkg::Options::="--force-confold" > /dev/null 2>&1
-pkg upgrade -y -o Dpkg::Options::="--force-confold" > /dev/null 2>&1
-echo -e "  ${BGRN}✓ Hoàn tất cập nhật hệ thống${NC}"
-echo ""
 
-# ── BƯỚC 2: Cài đặt gói ─────────────────────────────────
-echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BGRN}║  [BƯỚC 2/5] Cài đặt công cụ cần thiết           ║${NC}"
-echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 PKGS=("tmux" "curl" "tsu" "procps" "android-tools")
-total_p=${#PKGS[@]}
-for idx in "${!PKGS[@]}"; do
-    progress_bar $((idx+1)) $total_p "Cài ${PKGS[$idx]}..."
-    pkg install -y "${PKGS[$idx]}" > /dev/null 2>&1
+MISSING_PKGS=()
+
+# Kiểm tra từng gói bằng dpkg -s (nhanh, không cần mạng)
+for p in "${PKGS[@]}"; do
+    if dpkg -s "$p" > /dev/null 2>&1; then
+        printf "  ${GRN}✓${NC} %-20s ${GRN}[Đã cài]${NC}\n" "$p"
+    else
+        printf "  ${YLW}✗${NC} %-20s ${YLW}[Cần cài]${NC}\n" "$p"
+        MISSING_PKGS+=("$p")
+    fi
 done
-echo -e "  ${BGRN}✓ Hoàn tất cài đặt gói${NC}"
 echo ""
 
-# ── BƯỚC 3: Tải script mới nhất ─────────────────────────
-echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BGRN}║  [BƯỚC 3/5] Tải script auto_rejoin.sh           ║${NC}"
-echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
-SCRIPT_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh"
-progress_bar 1 4 "Đang kết nối GitHub..."
-sleep 0.3
-progress_bar 2 4 "Đang tải file..."
-if curl -fsSL -o auto_rejoin.sh.tmp "$SCRIPT_URL" 2>/dev/null && [ -s auto_rejoin.sh.tmp ]; then
-    mv auto_rejoin.sh.tmp auto_rejoin.sh
-    progress_bar 3 4 "Đang xác thực..."
-    sleep 0.2
-    progress_bar 4 4 "Hoàn tất!"
-    echo -e "  ${BGRN}✓ Tải thành công từ GitHub${NC}"
+if [ ${#MISSING_PKGS[@]} -eq 0 ]; then
+    echo -e "  ${BGRN}✓ Tất cả gói đã sẵn sàng — bỏ qua bước cài đặt${NC}"
 else
-    rm -f auto_rejoin.sh.tmp
+    echo -e "  ${YLW}Đang cập nhật danh sách repo...${NC}"
+    pkg update -y -o Dpkg::Options::="--force-confold" 2>&1 | tail -3
+    echo ""
+    local mp_total=${#MISSING_PKGS[@]}
+    local mp_idx=0
+    for p in "${MISSING_PKGS[@]}"; do
+        mp_idx=$((mp_idx+1))
+        echo -ne "  ${CYN}[$mp_idx/$mp_total]${NC} Đang cài ${YLW}$p${NC}... "
+        if pkg install -y "$p" > /dev/null 2>&1; then
+            echo -e "${BGRN}✓ OK${NC}"
+        else
+            echo -e "${RED}✗ Lỗi! (thử thủ công: pkg install $p)${NC}"
+        fi
+    done
+    echo -e "  ${BGRN}✓ Hoàn tất cài đặt gói${NC}"
+fi
+echo ""
+
+# ── BƯỚC 2/4: Tải script mới nhất ─────────────────────────
+echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
+echo -e "${BGRN}║  [BƯỚC 2/4] Tải script auto_rejoin.sh           ║${NC}"
+echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
+if [ -f "auto_rejoin.sh" ]; then
     progress_bar 4 4 "Dùng bản local..."
-    echo -e "  ${YLW}⚠ Không thể tải từ GitHub, dùng bản local${NC}"
+    echo -e "  ${BGRN}✓ Phát hiện bản local, bỏ qua tải từ GitHub để tránh ghi đè tùy chỉnh${NC}"
+else
+    SCRIPT_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh"
+    progress_bar 1 4 "Đang kết nối GitHub..."
+    sleep 0.3
+    progress_bar 2 4 "Đang tải file..."
+    if curl -fsSL -o auto_rejoin.sh.tmp "$SCRIPT_URL" 2>/dev/null && [ -s auto_rejoin.sh.tmp ]; then
+        mv auto_rejoin.sh.tmp auto_rejoin.sh
+        progress_bar 3 4 "Đang xác thực..."
+        sleep 0.2
+        progress_bar 4 4 "Hoàn tất!"
+        echo -e "  ${BGRN}✓ Tải thành công từ GitHub${NC}"
+    else
+        rm -f auto_rejoin.sh.tmp
+        progress_bar 4 4 "Dùng bản local..."
+        echo -e "  ${YLW}⚠ Không thể tải từ GitHub, dùng bản local${NC}"
+    fi
 fi
 chmod +x auto_rejoin.sh setup.sh
 echo ""
 
-# ── BƯỚC 4: Phát hiện executor ──────────────────────────
+# ── BƯỚC 3/4: Phát hiện executor ──────────────────────────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BGRN}║  [BƯỚC 4/5] Phát hiện phương thức hệ thống      ║${NC}"
+echo -e "${BGRN}║  [BƯỚC 3/4] Phát hiện phương thức hệ thống      ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 progress_bar 1 3 "Kiểm tra Root (su)..."
-sleep 0.3
 EXECUTOR_TYPE="direct"
-if command -v su > /dev/null 2>&1 && su -c "id" > /dev/null 2>&1; then
+if command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1; then
     EXECUTOR_TYPE="su"
     progress_bar 3 3 "Đã phát hiện!"
     echo -e "  ${BGRN}✓ Đã phát hiện quyền Root (su)${NC}"
 else
     progress_bar 2 3 "Kiểm tra ADB..."
-    sleep 0.3
-    if command -v adb > /dev/null 2>&1 && adb shell "id" > /dev/null 2>&1; then
+    if command -v adb > /dev/null 2>&1 && run_with_timeout 2 adb shell "id" > /dev/null 2>&1; then
         EXECUTOR_TYPE="adb"
         progress_bar 3 3 "Đã phát hiện!"
         echo -e "  ${BGRN}✓ Đã phát hiện ADB shell${NC}"
     else
-        progress_bar 3 3 "Chế độ direct"
+        progress_bar 3 3 "Che do direct"
         echo -e "  ${YLW}⚠ Không có root/adb, chạy chế độ direct (hạn chế)${NC}"
     fi
 fi
 echo ""
 
-# ── BƯỚC 5: Quét clone & Khởi động ──────────────────────
+# ── BƯỚC 4/4: Quét clone & Khởi động ──────────────────────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BGRN}║  [BƯỚC 5/5] Quét Roblox clone & Khởi động       ║${NC}"
+echo -e "${BGRN}║  [BƯỚC 4/4] Quét Roblox clone & Khởi động       ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 progress_bar 1 3 "Đang quét gói Roblox..."
 sleep 0.5

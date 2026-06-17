@@ -110,11 +110,32 @@ DISCORD_WEBHOOK="$DISCORD_WEBHOOK"
 EOF
 }
 
+# ── Chạy lệnh với timeout để tránh treo vĩnh viễn ───────
+run_with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout > /dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        # Fallback: chạy nền + wait với giới hạn thời gian
+        "$@" &
+        local pid=$!
+        local i=0
+        while kill -0 "$pid" 2>/dev/null && [ $i -lt "$secs" ]; do
+            sleep 1; i=$((i+1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null
+            return 124
+        fi
+        wait "$pid" 2>/dev/null
+    fi
+}
+
 # ── Phát hiện executor ───────────────────────────────────
 detect_executor() {
-    if command -v su > /dev/null 2>&1 && su -c "id" > /dev/null 2>&1; then
+    if command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1; then
         echo "su"
-    elif command -v adb > /dev/null 2>&1 && adb shell "id" > /dev/null 2>&1; then
+    elif command -v adb > /dev/null 2>&1 && run_with_timeout 2 adb shell "id" > /dev/null 2>&1; then
         echo "adb"
     else
         echo "direct"
@@ -122,7 +143,11 @@ detect_executor() {
 }
 
 EXECUTOR=""
-init_executor() { EXECUTOR=$(detect_executor); }
+# Chỉ quét executor 1 lần, cache lại để không quét lại mỗi lần vẽ menu
+init_executor() {
+    [ -n "$EXECUTOR" ] && return
+    EXECUTOR=$(detect_executor)
+}
 
 run_cmd() {
     case "$EXECUTOR" in
@@ -140,7 +165,7 @@ get_roblox_username() {
 
     # ── Nếu có Root: thử đọc trực tiếp từ data app ──────
     local has_root=false
-    command -v su > /dev/null 2>&1 && su -c "id" > /dev/null 2>&1 && has_root=true
+    command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1 && has_root=true
 
     if $has_root; then
         local data_dir="/data/data/${pkg}"
@@ -390,7 +415,8 @@ check_roblox_log_for_disconnect() {
     # Kiểm tra thời gian sửa đổi của log file để tránh nhận nhầm log của phiên chơi cũ trước đó
     local mtime
     mtime=$(run_cmd "stat -c %Y $log_dir/$latest_log 2>/dev/null || stat -f %m $log_dir/$latest_log 2>/dev/null" | tr -d '\r\n')
-    if [ -n "$mtime" ] && [ "$mtime" -lt "${LAST_LAUNCH:-0}" ]; then
+    # Thêm sai số 30 giây để xử lý tình trạng trễ đồng bộ của hệ thống tệp tin Android
+    if [ -n "$mtime" ] && [ "$((mtime + 30))" -lt "${LAST_LAUNCH:-0}" ]; then
         # File log chưa được cập nhật cho phiên chơi mới, bỏ qua
         return 1
     fi
@@ -400,7 +426,8 @@ check_roblox_log_for_disconnect() {
     [ -z "$log_tail" ] && return 1
 
     # Sử dụng grep -E -i (Extended Regex) tương thích tuyệt đối với Toybox/Busybox của Android
-    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|kick|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account"; then
+    # Bổ sung các từ khóa quét lỗi kick và lỗi dữ liệu lưu trữ
+    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|kick|kicked|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account|save data|didn't load right|data didn't load|closed connection|connection closed|failed to connect"; then
         return 0
     fi
 
@@ -580,36 +607,41 @@ get_all_configs() {
 #  MENU: Bang trang thai tong quan
 # =====================================================
 draw_main_status() {
+    # init_executor da duoc cache, khong ton thoi gian neu goi lai
     init_executor
     local cfgs; cfgs=$(get_all_configs)
     local tmux_wins
     tmux_wins=$(tmux list-windows -t roblox-multi -F "#{window_name}" 2>/dev/null)
 
-    # Đọc kết quả dumpsys từ file status dùng chung (nếu mới và tồn tại) để tránh lag
-    local dump_act=""
+    # Lay danh sach process 1 lan duy nhat bang ps (nhanh, khong treo)
+    # Uu tien shared cache cua watchdog neu con moi (< 45s)
+    local ps_snapshot=""
     local use_shared=false
     if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
-        local mtime
-        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
-        local now; now=$(date +%s)
-        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
-            use_shared=true
-        fi
+        local mtime now
+        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null \
+             || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
+        now=$(date +%s)
+        [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ] && use_shared=true
     fi
+
     if [ "$use_shared" = "true" ]; then
-        dump_act=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
+        ps_snapshot=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
     else
-        dump_act=$(run_cmd "dumpsys activity activities" 2>/dev/null < /dev/null)
+        # Khong co shared cache -> dung ps, tuyet doi KHONG goi dumpsys o day
+        ps_snapshot=$(run_cmd "ps -A" 2>/dev/null)
+        [ -z "$ps_snapshot" ] && ps_snapshot=$(run_cmd "ps" 2>/dev/null)
     fi
 
     local total_online=0 total_acc=0
 
-    echo -e "${BGRN}+---+---------------------------+-----------+-----------+----------+----------+${NC}"
-    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name               ${BGRN}|${NC} USERNAME  ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
-    echo -e "${BGRN}+---+---------------------------+-----------+-----------+----------+----------+${NC}"
+    # Chieu rong cot: #(3) | pkg(29) | user(10) | game(9) | bot(8) | rejoin(8)
+    echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
+    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name                 ${BGRN}|${NC} USERNAME   ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
+    echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
 
     if [ -z "$cfgs" ]; then
-        echo -e "${BGRN}|${NC}  ${RED}Chua co acc nao! Chay [1] Setup truoc.${NC}                              ${BGRN}|${NC}"
+        echo -e "${BGRN}|${NC}  ${RED}Chua co acc nao! Chay [1] Setup truoc.${NC}                                  ${BGRN}|${NC}"
     else
         local idx=1
         for cfg in $cfgs; do
@@ -618,39 +650,44 @@ draw_main_status() {
             [ -z "$pkg" ] && continue
             total_acc=$((total_acc+1))
 
-            # Username tu config
+            # Username tu config (toi da 10 ky tu)
             local uname; uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
             uname="${uname:0:10}"
             uname="${uname:-N/A}"
 
-            # Trang thai game: dung ket qua dumpsys da lay 1 lan o tren
-            local game_s="${RED}OFFLINE   ${NC}"
-            if echo "$dump_act" | grep -q "$pkg"; then
-                game_s="${BGRN}* ONLINE  ${NC}"
+            # Trang thai game - kiem tra trong snapshot da lay 1 lan
+            local game_text game_color
+            if echo "$ps_snapshot" | grep -q "$pkg"; then
+                game_text="ONLINE"; game_color="$BGRN"
                 total_online=$((total_online+1))
+            else
+                game_text="OFFLINE"; game_color="$RED"
             fi
 
             # Trang thai bot tmux
             local win_name="${pkg//./_}"
-            local bot_s="${RED}STOPPED ${NC}"
-            echo "$tmux_wins" | grep -q "^${win_name}$" && bot_s="${GRN}RUNNING ${NC}"
+            local bot_text bot_color
+            if echo "$tmux_wins" | grep -q "^${win_name}$"; then
+                bot_text="RUNNING"; bot_color="$GRN"
+            else
+                bot_text="STOPPED"; bot_color="$RED"
+            fi
 
             # So lan rejoin
             local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
+            local short_pkg="${pkg:0:29}"
 
-            local short_pkg="${pkg:0:27}"
-
-            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-27s ${BGRN}|${NC} %-9s ${BGRN}|${NC} " \
+            # In hang du lieu - tach ma ANSI ra khoi %-format de printf tinh dung chieu rong
+            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-29s ${BGRN}|${NC} %-10s ${BGRN}|${NC} " \
                 "$idx" "$short_pkg" "$uname"
-            echo -en "$game_s"
-            printf "${BGRN}|${NC} "
-            echo -en "$bot_s"
-            printf "${BGRN}|${NC} %-8s ${BGRN}|${NC}\n" "$rj_cnt lan"
+            printf "${game_color}%-9s${NC} ${BGRN}|${NC} ${bot_color}%-8s${NC} ${BGRN}|${NC} %-8s ${BGRN}|${NC}\n" \
+                "$game_text" "$bot_text" "${rj_cnt} lan"
+
             idx=$((idx+1))
         done
     fi
 
-    echo -e "${BGRN}+---+---------------------------+-----------+-----------+----------+----------+${NC}"
+    echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
     echo -e " ${GRN}Tong:${NC} ${BGRN}$total_online${NC}/${total_acc} acc ONLINE"
 }
 
@@ -669,7 +706,7 @@ draw_header() {
     echo "  ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚═╝  ╚═╝"
     echo -e "${NC}"
     echo -e "  ${BGRN}AUTO REJOIN MULTI-CLONE BOT v3.1${NC}  ${CYN}│${NC}  ${YLW}$time_now${NC}"
-    echo -e "  ${GRN}Executor: ${WHT}$([ -n "$EXECUTOR" ] && echo "$EXECUTOR" || detect_executor)${NC}   ${GRN}PlaceID: ${WHT}$PLACE_ID${NC}   ${GRN}Private: ${WHT}${PRIVATE_CODE:-Không}${NC}"
+    echo -e "  ${GRN}Executor: ${WHT}${EXECUTOR:-?}${NC}   ${GRN}PlaceID: ${WHT}$PLACE_ID${NC}   ${GRN}Private: ${WHT}${PRIVATE_CODE:-Khong}${NC}"
 }
 
 # ══════════════════════════════════════════════════════════
@@ -728,7 +765,13 @@ view_clone_detail() {
     if [ "$use_shared" = "true" ]; then
         ps_out=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
     else
-        ps_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+        # Fallback nhanh: pgrep hoac ps, khong dung dumpsys
+        if run_cmd "pgrep -f $pkg" > /dev/null 2>&1; then
+            ps_out="$pkg"  # gia tri truoc cho kiem tra grep phia duoi
+        else
+            ps_out=$(run_cmd "ps -A" 2>/dev/null)
+            [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+        fi
     fi
     local game_s="${RED}OFFLINE${NC}"
     echo "$ps_out" | grep -q "$pkg" && game_s="${BGRN}● ONLINE${NC}"
