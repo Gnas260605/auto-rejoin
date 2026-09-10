@@ -360,6 +360,8 @@ launch_roblox() {
         fi
     elif [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
         local idx; idx=$(get_package_index "$pkg")
+        local retry_offset=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + ${RUNTIME_BACKOFF_FAILURES:-0} + ${LOBBY_RETRY_COUNT:-0} ))
+        idx=$((idx + retry_offset))
         local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
         local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
         log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."

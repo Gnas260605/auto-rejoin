@@ -148,6 +148,7 @@ reset_monitor_state() {
     LAST_LAUNCH=0
     LAST_IN_GAME=0
     LOBBY_RETRY_COUNT=0
+    LOW_SERVER_RETRY_OFFSET=0
     TAP_ON_LOAD_DONE=false
     STABLE_SINCE=0
     MONITOR_NOW=1000
@@ -306,7 +307,8 @@ deep_link_retry_limit() {
     IN_GAME=false
     monitor_tick
     assert_eq "deep-link retry increments" "1" "$LOBBY_RETRY_COUNT"
-    assert_eq "deep-link retry -> LAUNCHING" "$MONITOR_STATE_LAUNCHING" "$MONITOR_STATE"
+    assert_eq "deep-link retry rotates low server" "1" "$LOW_SERVER_RETRY_OFFSET"
+    assert_eq "deep-link retry -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
 
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_LOADING"

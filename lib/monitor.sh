@@ -170,10 +170,11 @@ monitor_handle_loading() {
     if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
         if [ "$LOBBY_RETRY_COUNT" -lt 3 ]; then
             LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
-            log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh ${time_stuck}s! Gửi lại deep-link (Lần thử $LOBBY_RETRY_COUNT/3)..."
-            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh ${time_stuck}s. Đang gửi lại deep-link (Thử lần $LOBBY_RETRY_COUNT/3)..."
+            LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
+            log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh/loading ${time_stuck}s! Force-stop rồi chọn lại server ít người (Lần thử $LOBBY_RETRY_COUNT/3)..."
+            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh/loading ${time_stuck}s. Đang force-stop và chọn lại server ít người (Thử lần $LOBBY_RETRY_COUNT/3)..."
             log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "lobby_deeplink_retry" retry "$LOBBY_RETRY_COUNT"
-            monitor_transition "$MONITOR_STATE_LAUNCHING" "deep_link_retry"
+            monitor_request_recovery "lobby_deeplink_retry" "true"
         else
             log_msg "${RED}[LOBBY]${NC} Kẹt ở sảnh quá lâu (> 3 lần thử)! Tiến hành khởi động lại game..."
             send_discord "🚨 **[$ROBLOX_PACKAGE]** Kẹt ở sảnh quá lâu. Khởi động lại game!"
@@ -222,6 +223,7 @@ monitor_handle_in_game() {
     if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
         log_msg "${GRN}[GAME]${NC} Đã vào game thành công! Reset bộ đếm sảnh."
         LOBBY_RETRY_COUNT=0
+        LOW_SERVER_RETRY_OFFSET=0
     fi
 
     if [ "$TAP_ON_LOAD_DONE" = "false" ]; then
