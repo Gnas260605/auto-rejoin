@@ -47,6 +47,27 @@ bootstrap_download() {
         "$url"
 }
 
+download_or_keep_local() {
+    local url="$1"
+    local target="$2"
+    local label="$3"
+
+    if bootstrap_download "$url" "${target}.tmp" 2>/dev/null && [ -s "${target}.tmp" ]; then
+        mv "${target}.tmp" "$target"
+        echo -e "  ${BGRN}✓ Đã cập nhật ${label} từ GitHub${NC}"
+        return 0
+    fi
+
+    rm -f "${target}.tmp"
+    if [ -f "$target" ]; then
+        echo -e "  ${YLW}⚠ Không thể tải ${label}; giữ bản local hiện có${NC}"
+        return 0
+    fi
+
+    echo -e "  ${RED}✗ Không thể tải ${label} và chưa có file local${NC}"
+    return 1
+}
+
 # ── Progress bar ─────────────────────────────────────────
 progress_bar() {
     local current=$1 total=$2 label="${3:-}"
@@ -136,50 +157,20 @@ echo ""
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║  [BƯỚC 2/4] Tải script auto_rejoin.sh           ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
-if [ -f "auto_rejoin.sh" ]; then
-    progress_bar 4 4 "Dùng bản local..."
-    echo -e "  ${BGRN}✓ Phát hiện bản local, bỏ qua tải từ GitHub để tránh ghi đè tùy chỉnh${NC}"
-else
-    SCRIPT_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh"
-    progress_bar 1 4 "Đang kết nối GitHub..."
-    sleep 0.3
-    progress_bar 2 4 "Đang tải file..."
-    if bootstrap_download "$SCRIPT_URL" auto_rejoin.sh.tmp 2>/dev/null && [ -s auto_rejoin.sh.tmp ]; then
-        mv auto_rejoin.sh.tmp auto_rejoin.sh
-        progress_bar 3 4 "Đang xác thực..."
-        sleep 0.2
-        progress_bar 4 4 "Hoàn tất!"
-        echo -e "  ${BGRN}✓ Tải thành công từ GitHub${NC}"
-    else
-        rm -f auto_rejoin.sh.tmp
-        progress_bar 4 4 "Dùng bản local..."
-        echo -e "  ${YLW}⚠ Không thể tải từ GitHub, dùng bản local${NC}"
-    fi
-fi
+SCRIPT_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh"
+progress_bar 1 4 "Đang kết nối GitHub..."
+sleep 0.3
+progress_bar 2 4 "Đang cập nhật script..."
+download_or_keep_local "$SCRIPT_URL" "auto_rejoin.sh" "auto_rejoin.sh" || exit 1
+progress_bar 4 4 "Hoàn tất!"
 mkdir -p lib
 for lib_file in config.sh android.sh network.sh logger.sh runtime.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh; do
-    if [ ! -f "lib/${lib_file}" ]; then
-        LIB_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/lib/${lib_file}"
-        if bootstrap_download "$LIB_URL" "lib/${lib_file}.tmp" 2>/dev/null && [ -s "lib/${lib_file}.tmp" ]; then
-            mv "lib/${lib_file}.tmp" "lib/${lib_file}"
-            echo -e "  ${BGRN}✓ Đã tải lib/${lib_file}${NC}"
-        else
-            rm -f "lib/${lib_file}.tmp"
-            echo -e "  ${YLW}⚠ Không thể tải lib/${lib_file}; setup sẽ dùng fallback hạn chế nếu có thể${NC}"
-        fi
-    fi
+    LIB_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/lib/${lib_file}"
+    download_or_keep_local "$LIB_URL" "lib/${lib_file}" "lib/${lib_file}" || true
 done
 mkdir -p bin
-if [ ! -f "bin/roblox-manager" ]; then
-    CLI_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/bin/roblox-manager"
-    if bootstrap_download "$CLI_URL" "bin/roblox-manager.tmp" 2>/dev/null && [ -s "bin/roblox-manager.tmp" ]; then
-        mv "bin/roblox-manager.tmp" "bin/roblox-manager"
-        echo -e "  ${BGRN}✓ Đã tải bin/roblox-manager${NC}"
-    else
-        rm -f "bin/roblox-manager.tmp"
-        echo -e "  ${YLW}⚠ Không thể tải bin/roblox-manager${NC}"
-    fi
-fi
+CLI_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/bin/roblox-manager"
+download_or_keep_local "$CLI_URL" "bin/roblox-manager" "bin/roblox-manager" || true
 if [ ! -f "VERSION" ]; then
     VERSION_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/VERSION"
     if bootstrap_download "$VERSION_URL" "VERSION.tmp" 2>/dev/null && [ -s "VERSION.tmp" ]; then
