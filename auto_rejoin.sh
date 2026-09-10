@@ -497,6 +497,20 @@ launch_roblox() {
         [ $ret -eq 0 ] && launch_success=true
     fi
 
+    # Some Android/emulator builds reject -S/clear-task on VIEW deep-links.
+    # Keep the target package scoped so we do not open the last Roblox/home place.
+    if [ $ret -ne 0 ]; then
+        ANDROID_EXECUTOR=direct android_start_uri "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+        ret=$?
+        [ $ret -eq 0 ] && launch_success=true
+    fi
+
+    if [ $ret -ne 0 ]; then
+        android_start_uri_for_user 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+        ret=$?
+        [ $ret -eq 0 ] && launch_success=true
+    fi
+
     # 3. Chỉ cho phép deep-link không chỉ định package khi người vận hành bật rõ ràng.
     # Fallback này có thể mở nhầm Roblox clone hoặc experience gần nhất trên thiết bị.
     if [ $ret -ne 0 ] && [ "${ALLOW_UNSCOPED_DEEPLINK:-false}" = "true" ]; then
