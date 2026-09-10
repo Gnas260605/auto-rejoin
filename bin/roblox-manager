@@ -244,6 +244,10 @@ Usage:
 EOF
                 return 0
                 ;;
+            [0-9]*|https://*|roblox://*)
+                link="$1"
+                non_interactive="true"
+                ;;
             *)
                 echo "Error: unknown setup option: $1" >&2
                 return 2
