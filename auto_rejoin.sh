@@ -367,6 +367,10 @@ launch_roblox() {
         log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
         local server_info
         server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" 2>/dev/null || true)"
+        if [ -z "$server_info" ] && [ "${max_p:-0}" -gt 0 ]; then
+            log_msg "${YLW}[LOW_SERVER]${NC} Không có server <=${max_p} người; thử chọn server thấp nhất còn trống..."
+            server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" 0 2>/dev/null || true)"
+        fi
         if [ -n "$server_info" ]; then
             local chosen_job="${server_info%%|*}"
             local rest="${server_info#*|}"
@@ -379,15 +383,19 @@ launch_roblox() {
             }
         else
             if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
-                log_msg "${RED}[LOW_SERVER]${NC} Không chọn được server ít người từ API; strict mode sẽ retry thay vì vào server đông."
-                log_event WARN low_server_strict_no_match "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
-                return 1
+                log_msg "${YLW}[LOW_SERVER]${NC} API server ít người không khả dụng/rate-limit; vẫn mở đúng Place ID thay vì đứng im."
+                log_event WARN low_server_strict_fallback "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+                    return 1
+                }
+            else
+                log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
+                link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+                    return 1
+                }
             fi
-            log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
-            link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                return 1
-            }
         fi
     else
         link="$(roblox_build_game_uri "$PLACE_ID")" || {
