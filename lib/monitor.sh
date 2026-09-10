@@ -109,14 +109,24 @@ monitor_note_stable_game() {
     fi
 }
 
+monitor_wrong_place_detected() {
+    declare -F check_roblox_log_for_wrong_place >/dev/null 2>&1 && check_roblox_log_for_wrong_place
+}
+
 monitor_launch_once() {
     STABLE_SINCE=0
-    launch_roblox
+    if ! launch_roblox; then
+        log_event WARN launch_attempt_failed "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "${1:-launch_sent}"
+        MONITOR_RECOVERY_REASON="launch_failed"
+        MONITOR_RECOVERY_COUNT_REJOIN="true"
+        monitor_transition "$MONITOR_STATE_RECOVERING" "launch_failed"
+        return 1
+    fi
     monitor_transition "$MONITOR_STATE_LOADING" "${1:-launch_sent}"
 }
 
 monitor_handle_launching() {
-    monitor_launch_once "${MONITOR_REASON:-startup}"
+    monitor_launch_once "${MONITOR_REASON:-startup}" || return 0
 }
 
 monitor_handle_loading() {
@@ -141,6 +151,12 @@ monitor_handle_loading() {
 
     if check_roblox_log_for_disconnect; then
         monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
+        return 0
+    fi
+
+    if monitor_wrong_place_detected; then
+        send_discord "[WARN] **[$ROBLOX_PACKAGE]** Roblox vao sai Place ID. Dang rejoin lai dung game..."
+        monitor_request_recovery "wrong_place_detected" "true"
         return 0
     fi
 
@@ -186,6 +202,12 @@ monitor_handle_in_game() {
 
     if check_roblox_log_for_disconnect; then
         monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
+        return 0
+    fi
+
+    if monitor_wrong_place_detected; then
+        send_discord "[WARN] **[$ROBLOX_PACKAGE]** Roblox vao sai Place ID. Dang rejoin lai dung game..."
+        monitor_request_recovery "wrong_place_detected" "true"
         return 0
     fi
 
@@ -261,7 +283,7 @@ monitor_handle_recovering() {
     [ "$count_rejoin" = "true" ] && inc_rejoin_count "$ROBLOX_PACKAGE"
     LOBBY_RETRY_COUNT=0
     STABLE_SINCE=0
-    monitor_launch_once "$reason"
+    monitor_launch_once "$reason" || return 0
 }
 
 monitor_handle_cooldown() {

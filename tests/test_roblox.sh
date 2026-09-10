@@ -50,19 +50,19 @@ assert_invalid() {
 valid_inputs() {
     assert_parse "valid www game URL" \
         "https://www.roblox.com/games/2753915549/Game-Name" \
-        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549"
+        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549&launchData=placeId%3D2753915549"
     assert_parse "valid non-www game URL" \
         "https://roblox.com/games/2753915549/Game-Name" \
-        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549"
+        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549&launchData=placeId%3D2753915549"
     assert_parse "game URL without slug" \
         "https://www.roblox.com/games/2753915549" \
-        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549"
+        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549&launchData=placeId%3D2753915549"
     assert_parse "game URL with query" \
         "https://www.roblox.com/games/2753915549/Game-Name?something=value" \
-        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549"
+        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549&launchData=placeId%3D2753915549"
     assert_parse "raw Place ID" \
         "2753915549" \
-        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549"
+        "game" "2753915549" "" "roblox://experiences/start?placeId=2753915549&launchData=placeId%3D2753915549"
     assert_parse "valid share URL" \
         "https://www.roblox.com/share?code=ABC123&type=Server" \
         "private_server" "" "ABC123" "roblox://navigation/share_links?code=ABC123&type=Server"
@@ -74,7 +74,7 @@ valid_inputs() {
         "private_server" "" "ABC_123" "roblox://navigation/share_links?code=ABC_123&type=Server"
     assert_parse "valid roblox game URI" \
         "roblox://experiences/start?placeId=123" \
-        "game" "123" "" "roblox://experiences/start?placeId=123"
+        "game" "123" "" "roblox://experiences/start?placeId=123&launchData=placeId%3D123"
     assert_parse "valid roblox private URI" \
         "roblox://navigation/share_links?code=ABC123&type=Server" \
         "private_server" "" "ABC123" "roblox://navigation/share_links?code=ABC123&type=Server"
@@ -106,7 +106,7 @@ security_inputs_do_not_execute() {
 }
 
 uri_builders() {
-    assert_eq "game URI exact" "roblox://experiences/start?placeId=123" "$(roblox_build_game_uri 123)"
+    assert_eq "game URI exact" "roblox://experiences/start?placeId=123&launchData=placeId%3D123" "$(roblox_build_game_uri 123)"
     assert_eq "private URI exact" "roblox://navigation/share_links?code=ABC123&type=Server" "$(roblox_build_private_server_uri ABC123)"
 }
 

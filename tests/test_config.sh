@@ -23,6 +23,8 @@ reset_config_vars() {
     unset PROFILE
     unset FREEFORM_LAYOUT FREEFORM_WIDTH FREEFORM_HEIGHT FREEFORM_OFFSET_X FREEFORM_OFFSET_Y
     unset LICENSE_MODE AUTO_REJOIN_LICENSE_MODE
+    unset JOIN_LOW_SERVER LOW_SERVER_MIN_PLAYERS LOW_SERVER_MAX_PLAYERS LOW_SERVER_STRICT
+    unset ALLOW_UNSCOPED_DEEPLINK ALLOW_HOME_FALLBACK
     CONFIG_WARNINGS=""
 }
 
@@ -90,7 +92,10 @@ valid_config() {
         'FREEFORM_HEIGHT=960' \
         'FREEFORM_OFFSET_X=60' \
         'FREEFORM_OFFSET_Y=80' \
-        'LICENSE_MODE=required'
+        'LICENSE_MODE=required' \
+        'LOW_SERVER_STRICT=true' \
+        'ALLOW_UNSCOPED_DEEPLINK=false' \
+        'ALLOW_HOME_FALLBACK=false'
 
     run_load "$cfg"
     assert_status "valid config status" 0 "$?"
@@ -98,6 +103,9 @@ valid_config() {
     assert_eq "valid config package" "com.roblox.client" "$ROBLOX_PACKAGE"
     assert_eq "valid config profile" "BloxFruits" "$PROFILE"
     assert_eq "valid config license mode" "required" "$LICENSE_MODE"
+    assert_eq "valid config low strict" "true" "$LOW_SERVER_STRICT"
+    assert_eq "valid config unscoped fallback" "false" "$ALLOW_UNSCOPED_DEEPLINK"
+    assert_eq "valid config home fallback" "false" "$ALLOW_HOME_FALLBACK"
 }
 
 quoted_values() {
@@ -201,6 +209,9 @@ missing_config_uses_defaults() {
     assert_eq "default package" "com.roblox.client" "$ROBLOX_PACKAGE"
     assert_eq "default check interval" "30" "$CHECK_INTERVAL"
     assert_eq "default profile" "default" "$PROFILE"
+    assert_eq "default low strict" "false" "$LOW_SERVER_STRICT"
+    assert_eq "default unscoped fallback" "false" "$ALLOW_UNSCOPED_DEEPLINK"
+    assert_eq "default home fallback" "false" "$ALLOW_HOME_FALLBACK"
 }
 
 save_and_reload() {
@@ -211,6 +222,8 @@ save_and_reload() {
     PRIVATE_CODE=abc
     ROBLOX_PACKAGE=com.roblox.client_clone2
     ROBLOX_USERNAME=Acc02
+    LOW_SERVER_STRICT=true
+    ALLOW_UNSCOPED_DEEPLINK=true
     config_save "$cfg"
     assert_status "save config status" 0 "$?"
 
@@ -218,6 +231,8 @@ save_and_reload() {
     assert_status "reload saved config status" 0 "$?"
     assert_eq "reload saved PLACE_ID" "999" "$PLACE_ID"
     assert_eq "reload saved username" "Acc02" "$ROBLOX_USERNAME"
+    assert_eq "reload saved low strict" "true" "$LOW_SERVER_STRICT"
+    assert_eq "reload saved unscoped fallback" "true" "$ALLOW_UNSCOPED_DEEPLINK"
 }
 
 migration_idempotency() {

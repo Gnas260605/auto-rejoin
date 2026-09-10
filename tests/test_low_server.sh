@@ -54,11 +54,11 @@ assert_status "reject too short job id" 1 $?
 
 # 2. URI Building
 assert_eq "build standard game uri" \
-    "roblox://experiences/start?placeId=189707" \
+    "roblox://experiences/start?placeId=189707&launchData=placeId%3D189707" \
     "$(roblox_build_game_uri 189707)"
 
 assert_eq "build game uri with gameInstanceId" \
-    "roblox://experiences/start?placeId=189707&gameInstanceId=c62b53b8-39c8-47bc-9b6f-8d76d4992955" \
+    "roblox://experiences/start?placeId=189707&gameInstanceId=c62b53b8-39c8-47bc-9b6f-8d76d4992955&launchData=placeId%3D189707" \
     "$(roblox_build_game_uri 189707 "c62b53b8-39c8-47bc-9b6f-8d76d4992955")"
 
 # 3. URI Parsing with gameInstanceId
@@ -66,7 +66,7 @@ roblox_parse_uri "roblox://experiences/start?placeId=189707&gameInstanceId=c62b5
 assert_status "parse uri with gameInstanceId status" 0 $?
 assert_eq "parsed placeId" "189707" "$ROBLOX_PARSED_PLACE_ID"
 assert_eq "parsed uri preserves gameInstanceId" \
-    "roblox://experiences/start?placeId=189707&gameInstanceId=c62b53b8-39c8-47bc-9b6f-8d76d4992955" \
+    "roblox://experiences/start?placeId=189707&gameInstanceId=c62b53b8-39c8-47bc-9b6f-8d76d4992955&launchData=placeId%3D189707" \
     "$ROBLOX_PARSED_URI"
 
 # 4. Mocking roblox_fetch_public_servers for Multi-Clone Distribution Test

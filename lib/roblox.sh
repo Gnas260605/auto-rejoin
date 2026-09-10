@@ -114,9 +114,9 @@ roblox_build_game_uri() {
     roblox_validate_place_id "$place_id" || return 1
     if [ -n "$job_id" ]; then
         roblox_validate_job_id "$job_id" || return 1
-        printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s\n' "$place_id" "$job_id"
+        printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s&launchData=placeId%%3D%s\n' "$place_id" "$job_id" "$place_id"
     else
-        printf 'roblox://experiences/start?placeId=%s\n' "$place_id"
+        printf 'roblox://experiences/start?placeId=%s&launchData=placeId%%3D%s\n' "$place_id" "$place_id"
     fi
 }
 

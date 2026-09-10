@@ -102,7 +102,12 @@ check_roblox_log_for_disconnect() {
     [ "$DISCONNECT" = "true" ]
 }
 
+check_roblox_log_for_wrong_place() {
+    [ "$WRONG_PLACE" = "true" ]
+}
+
 launch_roblox() {
+    [ "${LAUNCH_OK:-true}" = "true" ] || return 1
     LAUNCH_COUNT=$((LAUNCH_COUNT + 1))
     LAST_LAUNCH="$MONITOR_NOW"
 }
@@ -136,6 +141,8 @@ reset_monitor_state() {
     RUNNING=true
     IN_GAME=false
     DISCONNECT=false
+    WRONG_PLACE=false
+    LAUNCH_OK=true
     LAST_RESTART=0
     LAST_AFK_TAP=0
     LAST_LAUNCH=0
@@ -176,6 +183,16 @@ launch_success_to_loading() {
     assert_eq "launch called once" "1" "$LAUNCH_COUNT"
 }
 
+launch_failure_to_recovering() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
+    LAUNCH_OK=false
+    monitor_tick
+    assert_eq "launch failure -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "failed launch not counted as sent" "0" "$LAUNCH_COUNT"
+    assert_eq "launch failure reason" "launch_failed" "$MONITOR_RECOVERY_REASON"
+}
+
 game_activity_to_in_game() {
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_LOADING"
@@ -204,6 +221,15 @@ disconnect_to_recovering() {
     assert_eq "disconnect signal -> DISCONNECTED" "$MONITOR_STATE_DISCONNECTED" "$MONITOR_STATE"
     monitor_tick
     assert_eq "DISCONNECTED -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+}
+
+wrong_place_to_recovering() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    WRONG_PLACE=true
+    monitor_tick
+    assert_eq "wrong place -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "wrong place reason" "wrong_place_detected" "$MONITOR_RECOVERY_REASON"
 }
 
 recovery_uses_backoff() {
@@ -322,9 +348,11 @@ stable_runtime_resets_backoff() {
 
 startup_to_launching
 launch_success_to_loading
+launch_failure_to_recovering
 game_activity_to_in_game
 process_missing_to_crashed
 disconnect_to_recovering
+wrong_place_to_recovering
 recovery_uses_backoff
 failure_threshold_to_cooldown
 offline_and_restore

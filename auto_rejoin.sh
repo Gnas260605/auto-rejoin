@@ -348,11 +348,16 @@ launch_roblox() {
     local pkg="${ROBLOX_PACKAGE}"
     log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
     local link=""
+    local launch_success=false
     if [ -n "$PRIVATE_CODE" ]; then
         link="$(roblox_build_private_server_uri "$PRIVATE_CODE")" || {
             log_msg "${RED}[LAUNCH]${NC} Private server code không hợp lệ."
             return 1
         }
+        if ! roblox_validate_place_id "$PLACE_ID"; then
+            log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ cho private server."
+            return 1
+        fi
     elif [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
         local idx; idx=$(get_package_index "$pkg")
         local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
@@ -366,10 +371,21 @@ launch_roblox() {
             local chosen_playing="${rest%%|*}"
             local chosen_max="${rest#*|}"
             log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
-            link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")"
+            link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || {
+                log_msg "${RED}[LAUNCH]${NC} Place ID hoặc Job ID không hợp lệ."
+                return 1
+            }
         else
+            if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
+                log_msg "${RED}[LOW_SERVER]${NC} Không chọn được server ít người từ API; strict mode sẽ retry thay vì vào server đông."
+                log_event WARN low_server_strict_no_match "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                return 1
+            fi
             log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
-            link="$(roblox_build_game_uri "$PLACE_ID")"
+            link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+                return 1
+            }
         fi
     else
         link="$(roblox_build_game_uri "$PLACE_ID")" || {
@@ -462,30 +478,43 @@ launch_roblox() {
     # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
     ANDROID_EXECUTOR=direct android_start_uri "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
     local ret=$?
+    [ $ret -eq 0 ] && launch_success=true
 
     # 2. Nếu thất bại, thử chạy qua run_cmd (su/adb) kèm theo --user 0
     if [ $ret -ne 0 ]; then
         android_start_uri_for_user 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
+        [ $ret -eq 0 ] && launch_success=true
     fi
 
-    # 3. Cách 2: am start không chỉ định package (quyền Termux user)
-    if [ $ret -ne 0 ]; then
+    # 3. Chỉ cho phép deep-link không chỉ định package khi người vận hành bật rõ ràng.
+    # Fallback này có thể mở nhầm Roblox clone hoặc experience gần nhất trên thiết bị.
+    if [ $ret -ne 0 ] && [ "${ALLOW_UNSCOPED_DEEPLINK:-false}" = "true" ]; then
         ANDROID_EXECUTOR=direct android_start_uri "" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
+        [ $ret -eq 0 ] && launch_success=true
     fi
 
     # 4. Cách 2 (su/adb): am start không chỉ định package kèm theo --user 0
-    if [ $ret -ne 0 ]; then
+    if [ $ret -ne 0 ] && [ "${ALLOW_UNSCOPED_DEEPLINK:-false}" = "true" ]; then
         android_start_uri_for_user 0 "" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
+        [ $ret -eq 0 ] && launch_success=true
     fi
 
-    # 5. Cách 3: Mở thẳng MainActivity
-    if [ $ret -ne 0 ]; then
+    # 5. Mở thẳng MainActivity chỉ khi bật rõ ràng vì cách này không bảo đảm đúng Place ID.
+    if [ $ret -ne 0 ] && [ "${ALLOW_HOME_FALLBACK:-false}" = "true" ]; then
         ANDROID_EXECUTOR=direct android_start_activity "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
         android_start_activity_for_user 0 "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
         android_monkey_package "$pkg" > /dev/null 2>&1
+        ret=$?
+        [ $ret -eq 0 ] && launch_success=true
+    fi
+
+    if [ "$launch_success" != "true" ]; then
+        log_msg "${RED}[LAUNCH]${NC} Không gửi được deep-link đúng package/placeId cho $pkg. Sẽ retry qua recovery."
+        log_event WARN launch_failed "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" allow_unscoped "${ALLOW_UNSCOPED_DEEPLINK:-false}" allow_home "${ALLOW_HOME_FALLBACK:-false}"
+        return 1
     fi
 
     LAST_RESTART=$(date +%s)
@@ -634,7 +663,7 @@ check_roblox_log_for_disconnect() {
 
     # Sử dụng grep -E -i (Extended Regex) tương thích tuyệt đối với Toybox/Busybox của Android
     # Bổ sung các từ khóa quét lỗi kick và lỗi dữ liệu lưu trữ
-    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|kick|kicked|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account|save data|didn't load right|data didn't load|closed connection|connection closed|failed to connect"; then
+    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|disconnected|kick|kicked|moderation message|error code[:= ]*267|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account|save data|save data did.?n.?t load|didn.?t load right|data did.?n.?t load|please rejoin|closed connection|connection closed|failed to connect"; then
         return 0
     fi
 
@@ -644,6 +673,46 @@ check_roblox_log_for_disconnect() {
 # ══════════════════════════════════════════════════════════
 #  CHẾ ĐỘ --run : VÒNG LẶP GIÁM SÁT (chạy trong tmux)
 # ══════════════════════════════════════════════════════════
+# Phat hien Roblox da vao nham experience/placeId tu log phien hien tai.
+check_roblox_log_for_wrong_place() {
+    local pkg="$ROBLOX_PACKAGE"
+    local expected_place="$PLACE_ID"
+    local log_dir=""
+
+    roblox_validate_place_id "$expected_place" || return 1
+
+    if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
+        log_dir="/sdcard/Android/data/$pkg/files/logs"
+    elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
+        log_dir="/data/data/$pkg/files/logs"
+    fi
+
+    [ -z "$log_dir" ] && return 1
+
+    local latest_log
+    latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '\r\n')
+    [ -z "$latest_log" ] && return 1
+
+    local mtime
+    mtime=$(android_stat_mtime "$log_dir/$latest_log" 2>/dev/null | tr -d '\r\n')
+    if [ -n "$mtime" ] && [ "$((mtime + 30))" -lt "${LAST_LAUNCH:-0}" ]; then
+        return 1
+    fi
+
+    local observed_place
+    observed_place=$(android_tail_lines 220 "$log_dir/$latest_log" 2>/dev/null \
+        | grep -Eio 'placeId[^0-9]{0,12}[0-9]+' \
+        | grep -Eo '[0-9]+' \
+        | tail -n 1)
+
+    [ -z "$observed_place" ] && return 1
+    [ "$observed_place" = "$expected_place" ] && return 1
+
+    log_msg "${RED}[PLACE]${NC} Roblox dang o sai Place ID ${observed_place}; can ${expected_place}. Rejoin lai dung deep-link..."
+    log_event WARN wrong_place_detected "$LOG_FILE" package "$pkg" expected_place "$expected_place" observed_place "$observed_place"
+    return 0
+}
+
 start_bot() {
     monitor_run
 }
