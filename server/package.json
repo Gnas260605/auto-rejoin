@@ -1,0 +1,36 @@
+{
+  "name": "auto-rejoin-license-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "License authority backend for Auto Rejoin Pro.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development node src/server.js",
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/config/env.js && node --check src/db/pool.js && node --check src/db/migrate.js && node --check src/routes/license.routes.js && node --check src/controllers/license.controller.js && node --check src/services/license.service.js && node --check src/repositories/license.repository.js && node --check src/routes/admin.routes.js && node --check src/controllers/admin.controller.js && node --check src/services/admin.service.js && node --check src/repositories/admin.repository.js && node --check src/middleware/admin-auth.middleware.js && node --check src/middleware/admin-rate-limit.middleware.js && node --check src/utils/admin-auth.js && node --check src/constants/admin.js && node --check src/middleware/error.middleware.js && node --check src/middleware/rate-limit.middleware.js && node --check src/utils/token.js && node --check src/utils/time.js && node --check src/utils/response.js && node --check src/utils/logger.js && node --check src/constants/license.js && node --check scripts/create-license.js && node --check scripts/create-admin.js && node --check scripts/run-mysql-integration.js",
+    "test": "node --test",
+    "test:mysql": "node scripts/run-mysql-integration.js",
+    "migrate": "node src/db/migrate.js",
+    "create-license": "node scripts/create-license.js",
+    "create-admin": "node scripts/create-admin.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.11.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}

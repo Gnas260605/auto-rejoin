@@ -35,6 +35,18 @@ run_with_timeout() {
     fi
 }
 
+bootstrap_download() {
+    local url="$1"
+    local output="$2"
+    curl --fail --location --silent --show-error \
+        --connect-timeout 10 \
+        --max-time 120 \
+        --retry 3 \
+        --retry-delay 2 \
+        -o "$output" \
+        "$url"
+}
+
 # ── Progress bar ─────────────────────────────────────────
 progress_bar() {
     local current=$1 total=$2 label="${3:-}"
@@ -99,8 +111,8 @@ else
     echo -e "  ${YLW}Đang cập nhật danh sách repo...${NC}"
     pkg update -y -o Dpkg::Options::="--force-confold" 2>&1 | tail -3
     echo ""
-    local mp_total=${#MISSING_PKGS[@]}
-    local mp_idx=0
+    mp_total=${#MISSING_PKGS[@]}
+    mp_idx=0
     for p in "${MISSING_PKGS[@]}"; do
         mp_idx=$((mp_idx+1))
         echo -ne "  ${CYN}[$mp_idx/$mp_total]${NC} Đang cài ${YLW}$p${NC}... "
@@ -126,7 +138,7 @@ else
     progress_bar 1 4 "Đang kết nối GitHub..."
     sleep 0.3
     progress_bar 2 4 "Đang tải file..."
-    if curl -fsSL -o auto_rejoin.sh.tmp "$SCRIPT_URL" 2>/dev/null && [ -s auto_rejoin.sh.tmp ]; then
+    if bootstrap_download "$SCRIPT_URL" auto_rejoin.sh.tmp 2>/dev/null && [ -s auto_rejoin.sh.tmp ]; then
         mv auto_rejoin.sh.tmp auto_rejoin.sh
         progress_bar 3 4 "Đang xác thực..."
         sleep 0.2
@@ -138,8 +150,48 @@ else
         echo -e "  ${YLW}⚠ Không thể tải từ GitHub, dùng bản local${NC}"
     fi
 fi
-chmod +x auto_rejoin.sh setup.sh
+mkdir -p lib
+for lib_file in config.sh android.sh network.sh logger.sh runtime.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh; do
+    if [ ! -f "lib/${lib_file}" ]; then
+        LIB_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/lib/${lib_file}"
+        if bootstrap_download "$LIB_URL" "lib/${lib_file}.tmp" 2>/dev/null && [ -s "lib/${lib_file}.tmp" ]; then
+            mv "lib/${lib_file}.tmp" "lib/${lib_file}"
+            echo -e "  ${BGRN}✓ Đã tải lib/${lib_file}${NC}"
+        else
+            rm -f "lib/${lib_file}.tmp"
+            echo -e "  ${YLW}⚠ Không thể tải lib/${lib_file}; setup sẽ dùng fallback hạn chế nếu có thể${NC}"
+        fi
+    fi
+done
+mkdir -p bin
+if [ ! -f "bin/roblox-manager" ]; then
+    CLI_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/bin/roblox-manager"
+    if bootstrap_download "$CLI_URL" "bin/roblox-manager.tmp" 2>/dev/null && [ -s "bin/roblox-manager.tmp" ]; then
+        mv "bin/roblox-manager.tmp" "bin/roblox-manager"
+        echo -e "  ${BGRN}✓ Đã tải bin/roblox-manager${NC}"
+    else
+        rm -f "bin/roblox-manager.tmp"
+        echo -e "  ${YLW}⚠ Không thể tải bin/roblox-manager${NC}"
+    fi
+fi
+if [ ! -f "VERSION" ]; then
+    VERSION_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/VERSION"
+    if bootstrap_download "$VERSION_URL" "VERSION.tmp" 2>/dev/null && [ -s "VERSION.tmp" ]; then
+        mv "VERSION.tmp" "VERSION"
+        echo -e "  ${BGRN}✓ Đã tải VERSION${NC}"
+    else
+        rm -f "VERSION.tmp"
+        printf '4.0.0-dev\n' > VERSION
+        echo -e "  ${YLW}⚠ Không thể tải VERSION; dùng 4.0.0-dev${NC}"
+    fi
+fi
+chmod +x auto_rejoin.sh setup.sh lib/*.sh bin/roblox-manager 2>/dev/null
 echo ""
+
+if [ -f "${SCRIPT_DIR}/lib/android.sh" ]; then
+    # shellcheck source=lib/android.sh
+    source "${SCRIPT_DIR}/lib/android.sh"
+fi
 
 # ── BƯỚC 3/4: Phát hiện executor ──────────────────────────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
@@ -147,13 +199,24 @@ echo -e "${BGRN}║  [BƯỚC 3/4] Phát hiện phương thức hệ thống    
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 progress_bar 1 3 "Kiểm tra Root (su)..."
 EXECUTOR_TYPE="direct"
-if command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1; then
+if declare -F android_detect_executor >/dev/null 2>&1; then
+    EXECUTOR_TYPE="$(android_detect_executor)"
+fi
+if [ "$EXECUTOR_TYPE" = "su" ]; then
     EXECUTOR_TYPE="su"
     progress_bar 3 3 "Đã phát hiện!"
     echo -e "  ${BGRN}✓ Đã phát hiện quyền Root (su)${NC}"
 else
     progress_bar 2 3 "Kiểm tra ADB..."
-    if command -v adb > /dev/null 2>&1 && run_with_timeout 2 adb shell "id" > /dev/null 2>&1; then
+    if [ "$EXECUTOR_TYPE" = "adb" ]; then
+        EXECUTOR_TYPE="adb"
+        progress_bar 3 3 "Đã phát hiện!"
+        echo -e "  ${BGRN}✓ Đã phát hiện ADB shell${NC}"
+    elif ! declare -F android_detect_executor >/dev/null 2>&1 && command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1; then
+        EXECUTOR_TYPE="su"
+        progress_bar 3 3 "Đã phát hiện!"
+        echo -e "  ${BGRN}✓ Đã phát hiện quyền Root (su)${NC}"
+    elif ! declare -F android_detect_executor >/dev/null 2>&1 && command -v adb > /dev/null 2>&1 && run_with_timeout 2 adb shell "id" > /dev/null 2>&1; then
         EXECUTOR_TYPE="adb"
         progress_bar 3 3 "Đã phát hiện!"
         echo -e "  ${BGRN}✓ Đã phát hiện ADB shell${NC}"
@@ -172,11 +235,16 @@ progress_bar 1 3 "Đang quét gói Roblox..."
 sleep 0.5
 
 PACKAGES=""
-case "$EXECUTOR_TYPE" in
-    su)     PACKAGES=$(su -c "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
-    adb)    PACKAGES=$(adb shell "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
-    *)      PACKAGES=$(pm list packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
-esac
+if declare -F android_list_packages >/dev/null 2>&1; then
+    android_set_executor "$EXECUTOR_TYPE"
+    PACKAGES=$(android_list_packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r')
+else
+    case "$EXECUTOR_TYPE" in
+        su)     PACKAGES=$(su -c "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
+        adb)    PACKAGES=$(adb shell "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
+        *)      PACKAGES=$(pm list packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
+    esac
+fi
 
 progress_bar 2 3 "Phân tích danh sách..."
 sleep 0.3
@@ -382,13 +450,14 @@ PROJECT_DIR="$3" # Thư mục dự án
 TMP_DIR="${PROJECT_DIR}/tmp"
 mkdir -p "$TMP_DIR"
 
-run_cmd() {
-    case "$EXECUTOR" in
-        su)     su -c "$1" ;;
-        adb)    adb shell "$1" ;;
-        *)      eval "$1" ;;
-    esac
-}
+if [ -f "${PROJECT_DIR}/lib/android.sh" ]; then
+    # shellcheck source=lib/android.sh
+    source "${PROJECT_DIR}/lib/android.sh"
+    android_set_executor "$EXECUTOR"
+else
+    echo "[WATCHDOG] Missing ${PROJECT_DIR}/lib/android.sh; cannot run Android status cache safely." >&2
+    exit 1
+fi
 
 echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║       WATCHDOG - GIÁM SÁT TẤT CẢ BOT        ║${NC}"
@@ -401,12 +470,12 @@ while true; do
     echo -e "${CYN}[$TS]${NC} Đang cập nhật status cache & kiểm tra ${YLW}$(echo $ALL_CFGS | wc -w)${NC} bot..."
 
     # 1. Cập nhật dumpsys dùng chung cho các bot (giảm tải tối đa cho CPU)
-    run_cmd "dumpsys activity activities" > "${TMP_DIR}/roblox_activities.tmp" 2>/dev/null
+    android_dumpsys activity activities > "${TMP_DIR}/roblox_activities.tmp" 2>/dev/null
     if [ -s "${TMP_DIR}/roblox_activities.tmp" ]; then
         mv "${TMP_DIR}/roblox_activities.tmp" "${TMP_DIR}/roblox_activities.txt"
     fi
 
-    run_cmd "dumpsys window windows" > "${TMP_DIR}/roblox_windows.tmp" 2>/dev/null
+    android_dumpsys window windows > "${TMP_DIR}/roblox_windows.tmp" 2>/dev/null
     if [ -s "${TMP_DIR}/roblox_windows.tmp" ]; then
         mv "${TMP_DIR}/roblox_windows.tmp" "${TMP_DIR}/roblox_windows.txt"
     fi

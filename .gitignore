@@ -1,0 +1,14 @@
+.env
+server/.env
+node_modules/
+server/node_modules/
+npm-debug.log*
+coverage/
+.nyc_output/
+tmp/*
+!tmp/locks/
+*.log
+*.private.pem
+keys/private/
+release/private/
+release/

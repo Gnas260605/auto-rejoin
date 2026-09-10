@@ -13,6 +13,86 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TMP_DIR="${SCRIPT_DIR}/tmp"
 mkdir -p "$TMP_DIR"
 
+CONFIG_LIB="${SCRIPT_DIR}/lib/config.sh"
+if [ ! -f "$CONFIG_LIB" ]; then
+    echo "[ERROR] Missing config library: $CONFIG_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/config.sh
+source "$CONFIG_LIB"
+
+ANDROID_LIB="${SCRIPT_DIR}/lib/android.sh"
+if [ ! -f "$ANDROID_LIB" ]; then
+    echo "[ERROR] Missing Android command library: $ANDROID_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/android.sh
+source "$ANDROID_LIB"
+
+NETWORK_LIB="${SCRIPT_DIR}/lib/network.sh"
+if [ ! -f "$NETWORK_LIB" ]; then
+    echo "[ERROR] Missing network library: $NETWORK_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/network.sh
+source "$NETWORK_LIB"
+
+LOGGER_LIB="${SCRIPT_DIR}/lib/logger.sh"
+if [ ! -f "$LOGGER_LIB" ]; then
+    echo "[ERROR] Missing logger library: $LOGGER_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/logger.sh
+source "$LOGGER_LIB"
+
+RUNTIME_LIB="${SCRIPT_DIR}/lib/runtime.sh"
+if [ ! -f "$RUNTIME_LIB" ]; then
+    echo "[ERROR] Missing runtime library: $RUNTIME_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/runtime.sh
+source "$RUNTIME_LIB"
+
+LICENSE_LIB="${SCRIPT_DIR}/lib/license.sh"
+if [ ! -f "$LICENSE_LIB" ]; then
+    echo "[ERROR] Missing license library: $LICENSE_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/license.sh
+source "$LICENSE_LIB"
+
+ENTITLEMENT_LIB="${SCRIPT_DIR}/lib/entitlement.sh"
+if [ ! -f "$ENTITLEMENT_LIB" ]; then
+    echo "[ERROR] Missing entitlement library: $ENTITLEMENT_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/entitlement.sh
+source "$ENTITLEMENT_LIB"
+
+ROBLOX_LIB="${SCRIPT_DIR}/lib/roblox.sh"
+if [ ! -f "$ROBLOX_LIB" ]; then
+    echo "[ERROR] Missing Roblox library: $ROBLOX_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/roblox.sh
+source "$ROBLOX_LIB"
+
+NOTIFICATION_LIB="${SCRIPT_DIR}/lib/notification.sh"
+if [ ! -f "$NOTIFICATION_LIB" ]; then
+    echo "[ERROR] Missing notification library: $NOTIFICATION_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/notification.sh
+source "$NOTIFICATION_LIB"
+
+MONITOR_LIB="${SCRIPT_DIR}/lib/monitor.sh"
+if [ ! -f "$MONITOR_LIB" ]; then
+    echo "[ERROR] Missing monitor library: $MONITOR_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/monitor.sh
+source "$MONITOR_LIB"
+
 # ── Biến toàn cục cho bot loop ──────────────────────────
 LAST_RESTART=0
 LAST_AFK_TAP=0
@@ -22,6 +102,7 @@ LAST_IN_GAME=0
 IN_GAME_TIMEOUT=120
 LOBBY_RETRY_COUNT=0
 TAP_ON_LOAD_DONE=false
+STABLE_SINCE=0
 
 # ── Màu sắc ─────────────────────────────────────────────
 BLK='\033[0;30m'
@@ -43,18 +124,22 @@ beep_warn() { printf '\a\a' 2>/dev/null; }
 # ── Ghi log ─────────────────────────────────────────────
 log_msg() {
     local ts; ts=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${CYN}[$ts]${NC} $1"
-    # Lưu plain text vào file log (bỏ mã ANSI)
-    echo "[$ts] $(echo "$1" | sed 's/\x1b\[[0-9;]*m//g')" >> "$LOG_FILE"
+    local display
+    display="$(log_redact_secret "$1")"
+    echo -e "${CYN}[$ts]${NC} $display"
+    log_info "$display" "$LOG_FILE"
 }
 
 # ── Gửi Discord Webhook ──────────────────────────────────
 send_discord() {
-    [ -z "$DISCORD_WEBHOOK" ] && return
-    curl -s -H "Content-Type: application/json" \
-         -X POST \
-         -d "{\"content\": \"$1\"}" \
-         "$DISCORD_WEBHOOK" > /dev/null 2>&1
+    if declare -F entitlement_discord_allowed >/dev/null 2>&1 && ! entitlement_discord_allowed; then
+        if [ "${ENTITLEMENT_DISCORD_WARNED:-false}" != "true" ]; then
+            log_event WARN discord_entitlement_blocked "$LOG_FILE" package "${ROBLOX_PACKAGE:-unknown}" reason "missing_discord_entitlement"
+            ENTITLEMENT_DISCORD_WARNED=true
+        fi
+        return 0
+    fi
+    notification_send_discord "${DISCORD_WEBHOOK:-}" "$1" || true
 }
 
 # ── Thống kê rejoin ──────────────────────────────────────
@@ -81,43 +166,23 @@ get_rejoin_count() {
 
 # ── Tải/Lưu cấu hình ─────────────────────────────────────
 load_config() {
-    # shellcheck source=/dev/null
-    [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
-    PLACE_ID="${PLACE_ID:-97598239454123}"
-    PRIVATE_CODE="${PRIVATE_CODE:-}"
-    ROBLOX_PACKAGE="${ROBLOX_PACKAGE:-com.roblox.client}"
-    CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
-    AUTO_RESTART_PERIOD="${AUTO_RESTART_PERIOD:-7200}"
-    ANTI_AFK="${ANTI_AFK:-true}"
-    AFK_TAP_INTERVAL="${AFK_TAP_INTERVAL:-180}"
-    TAP_X="${TAP_X:-540}"
-    TAP_Y="${TAP_Y:-960}"
-    DISCORD_WEBHOOK="${DISCORD_WEBHOOK:-}"
-    FREEFORM_LAYOUT="${FREEFORM_LAYOUT:-false}"
-    FREEFORM_WIDTH="${FREEFORM_WIDTH:-auto}"
-    FREEFORM_HEIGHT="${FREEFORM_HEIGHT:-auto}"
-    FREEFORM_OFFSET_X="${FREEFORM_OFFSET_X:-auto}"
-    FREEFORM_OFFSET_Y="${FREEFORM_OFFSET_Y:-auto}"
+    if ! config_load "$CONFIG_FILE"; then
+        log_msg "${YLW}[CONFIG]${NC} Config có giá trị không hợp lệ; đã dùng default an toàn cho key lỗi."
+    fi
+    if [ -n "$CONFIG_WARNINGS" ]; then
+        while IFS= read -r warning; do
+            [ -n "$warning" ] && log_msg "${YLW}[CONFIG]${NC} $warning"
+        done <<EOF
+$CONFIG_WARNINGS
+EOF
+    fi
 }
 
 save_config() {
-    cat > "$CONFIG_FILE" <<EOF
-PLACE_ID="$PLACE_ID"
-PRIVATE_CODE="$PRIVATE_CODE"
-ROBLOX_PACKAGE="$ROBLOX_PACKAGE"
-CHECK_INTERVAL=$CHECK_INTERVAL
-AUTO_RESTART_PERIOD=$AUTO_RESTART_PERIOD
-ANTI_AFK=$ANTI_AFK
-AFK_TAP_INTERVAL=$AFK_TAP_INTERVAL
-TAP_X=$TAP_X
-TAP_Y=$TAP_Y
-DISCORD_WEBHOOK="$DISCORD_WEBHOOK"
-FREEFORM_LAYOUT="$FREEFORM_LAYOUT"
-FREEFORM_WIDTH="$FREEFORM_WIDTH"
-FREEFORM_HEIGHT="$FREEFORM_HEIGHT"
-FREEFORM_OFFSET_X="$FREEFORM_OFFSET_X"
-FREEFORM_OFFSET_Y="$FREEFORM_OFFSET_Y"
-EOF
+    if ! config_save "$CONFIG_FILE"; then
+        log_msg "${RED}[CONFIG]${NC} Không thể lưu config: $CONFIG_FILE"
+        return 1
+    fi
 }
 
 # ── Chạy lệnh với timeout để tránh treo vĩnh viễn ───────
@@ -143,13 +208,7 @@ run_with_timeout() {
 
 # ── Phát hiện executor ───────────────────────────────────
 detect_executor() {
-    if command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1; then
-        echo "su"
-    elif command -v adb > /dev/null 2>&1 && run_with_timeout 2 adb shell "id" > /dev/null 2>&1; then
-        echo "adb"
-    else
-        echo "direct"
-    fi
+    android_detect_executor
 }
 
 EXECUTOR=""
@@ -157,14 +216,12 @@ EXECUTOR=""
 init_executor() {
     [ -n "$EXECUTOR" ] && return
     EXECUTOR=$(detect_executor)
+    android_set_executor "$EXECUTOR"
 }
 
 run_cmd() {
-    case "$EXECUTOR" in
-        su)     su -c "$1" ;;
-        adb)    adb shell "$1" ;;
-        *)      eval "$1" ;;
-    esac
+    echo "run_cmd is deprecated; use lib/android.sh typed wrappers" >&2
+    return 2
 }
 
 # ── Tự động quét username Roblox ─────────────────────────
@@ -175,14 +232,11 @@ get_roblox_username() {
 
     # ── Nếu có Root: thử đọc trực tiếp từ data app ──────
     local has_root=false
-    command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1 && has_root=true
+    [ "$(android_detect_executor)" = "su" ] && has_root=true
 
     if $has_root; then
-        local data_dir="/data/data/${pkg}"
-
         # Cách 1: Đọc SharedPreferences XML (thường lưu tên acc ở đây)
-        uname=$(su -c "grep -rh 'username\|displayName\|display_name\|playerName\|userName\|name' \
-            ${data_dir}/shared_prefs/ 2>/dev/null" \
+        uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
             | grep -oP '(?<=value=")[^"]{3,40}' \
             | grep -v '^[0-9]*$' \
             | grep -v 'true\|false\|null' \
@@ -191,26 +245,28 @@ get_roblox_username() {
         # Cách 2: Thử SQLite database Roblox
         if [ -z "$uname" ]; then
             local db_file
-            db_file=$(su -c "ls ${data_dir}/databases/*.db 2>/dev/null" | head -1)
+            db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '\r')
             if [ -n "$db_file" ]; then
-                uname=$(su -c "sqlite3 '$db_file' \
-                    \"SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;\" \
-                    2>/dev/null" | head -1)
+                uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
             fi
         fi
 
         # Cách 3: Tìm trong các file JSON ở cấp đầu của files/ (tránh đệ quy sâu vào thư mục cache)
         if [ -z "$uname" ]; then
-            uname=$(su -c "grep -h '\"username\"' ${data_dir}/files/*.json 2>/dev/null" \
+            uname=$(android_app_grep_recursive "$pkg" files '"username"' 2>/dev/null \
                 | grep -oP '(?<="username":")[^"]{3,40}' \
                 | head -1 2>/dev/null)
         fi
 
         # Cách 4: Đọc account cache JSON nếu có (chỉ tìm trong thư mục files/ với maxdepth 2)
         if [ -z "$uname" ]; then
-            uname=$(su -c "find ${data_dir}/files -maxdepth 2 -name '*.json' -o -name '*account*' 2>/dev/null \
-                | xargs grep -h '\"username\"' 2>/dev/null" \
-                | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
+            local account_files account_file
+            account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
+            for account_file in $account_files; do
+                uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
+                    | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
+                [ -n "$uname" ] && break
+            done
         fi
     fi
 
@@ -252,14 +308,28 @@ scan_all_usernames() {
 # ── Mở Roblox vào game ───────────────────────────────────
 get_package_index() {
     local target_pkg="$1"
-    local all_pkgs
-    # Đọc danh sách package từ các file config đang có và sort để lấy số thứ tự chuẩn
-    all_pkgs=$(ls config_com*.cfg 2>/dev/null | xargs -n 1 grep '^ROBLOX_PACKAGE=' 2>/dev/null | cut -d'"' -f2 | sort -u)
+    local all_pkgs=""
+    local cfgs; cfgs=$(get_all_configs)
+    
+    if [ -n "$cfgs" ]; then
+        for cfg in $cfgs; do
+            if [ -f "$cfg" ]; then
+                local p; p=$(grep '^ROBLOX_PACKAGE=' "$cfg" 2>/dev/null | cut -d'"' -f2)
+                [ -n "$p" ] && all_pkgs="$all_pkgs $p"
+            fi
+        done
+    fi
+    
+    # Sắp xếp và loại bỏ trùng lặp
+    all_pkgs=$(echo $all_pkgs | xargs -n 1 | sort -u)
+    
+    # Nếu vẫn trống (ví dụ chưa chạy setup), quét hệ thống qua Executor (su/adb)
     if [ -z "$all_pkgs" ]; then
-        [ -f "config.cfg" ] && all_pkgs=$(grep '^ROBLOX_PACKAGE=' config.cfg 2>/dev/null | cut -d'"' -f2)
+        init_executor
+        all_pkgs=$(android_list_packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r' | sort -u)
     fi
     if [ -z "$all_pkgs" ]; then
-        all_pkgs=$(pm list packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r' | sort -u)
+        all_pkgs=$(ANDROID_EXECUTOR=direct android_list_packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r' | sort -u)
     fi
     [ -z "$all_pkgs" ] && all_pkgs="com.roblox.client"
 
@@ -279,22 +349,29 @@ launch_roblox() {
     log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
     local link
     if [ -n "$PRIVATE_CODE" ]; then
-        link="roblox://navigation/share_links?code=${PRIVATE_CODE}&type=Server"
+        link="$(roblox_build_private_server_uri "$PRIVATE_CODE")" || {
+            log_msg "${RED}[LAUNCH]${NC} Private server code không hợp lệ."
+            return 1
+        }
     else
-        link="roblox://experiences/start?placeId=${PLACE_ID}"
+        link="$(roblox_build_game_uri "$PLACE_ID")" || {
+            log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+            return 1
+        }
     fi
 
     local freeform_args=""
+    local bounds_args=()
     if [ "$FREEFORM_LAYOUT" = "true" ]; then
         # Đảm bảo bật freeform trong cài đặt hệ thống Android
-        run_cmd "settings put global enable_freeform_support 1" >/dev/null 2>&1
-        run_cmd "settings put secure force_resizable_activities 1" >/dev/null 2>&1
+        android_settings put global enable_freeform_support 1 >/dev/null 2>&1
+        android_settings put secure force_resizable_activities 1 >/dev/null 2>&1
         
         local idx; idx=$(get_package_index "$pkg")
         
         # Đọc độ phân giải màn hình thực tế từ wm size
         local size_str
-        size_str=$(run_cmd "wm size" 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
+        size_str=$(android_wm size 2>/dev/null | grep -oE '[0-9]+x[0-9]+' | head -n 1)
         local screen_w=1080
         local screen_h=1920
         if [ -n "$size_str" ]; then
@@ -312,52 +389,85 @@ launch_roblox() {
         # Tự động tính toán dựa trên hướng màn hình (Ngang hay Dọc)
         if [ "$screen_w" -gt "$screen_h" ]; then
             # Màn hình Ngang (Landscape - máy tính bảng / UGPhone)
-            [ "$h_val" = "auto" ] || [ -z "$h_val" ] && final_h=$(( screen_h * 75 / 100 )) || final_h=$h_val
-            [ "$w_val" = "auto" ] || [ -z "$w_val" ] && final_w=$(( final_h * 9 / 16 )) || final_w=$w_val
-            [ "$dx_val" = "auto" ] || [ -z "$dx_val" ] && final_dx=$(( screen_w * 3 / 100 )) || final_dx=$dx_val
-            [ "$dy_val" = "auto" ] || [ -z "$dy_val" ] && final_dy=$(( screen_h * 6 / 100 )) || final_dy=$dy_val
+            if [ "$h_val" = "auto" ] || [ -z "$h_val" ]; then
+                final_h=$(( screen_h * 75 / 100 ))
+            else
+                final_h=$h_val
+            fi
+            if [ "$w_val" = "auto" ] || [ -z "$w_val" ]; then
+                final_w=$(( final_h * 9 / 16 ))
+            else
+                final_w=$w_val
+            fi
+            if [ "$dx_val" = "auto" ] || [ -z "$dx_val" ]; then
+                final_dx=$(( screen_w * 3 / 100 ))
+            else
+                final_dx=$dx_val
+            fi
+            if [ "$dy_val" = "auto" ] || [ -z "$dy_val" ]; then
+                final_dy=$(( screen_h * 6 / 100 ))
+            else
+                final_dy=$dy_val
+            fi
         else
             # Màn hình Dọc (Portrait - điện thoại thông thường)
-            [ "$w_val" = "auto" ] || [ -z "$w_val" ] && final_w=$(( screen_w * 70 / 100 )) || final_w=$w_val
-            [ "$h_val" = "auto" ] || [ -z "$h_val" ] && final_h=$(( screen_h * 50 / 100 )) || final_h=$h_val
-            [ "$dx_val" = "auto" ] || [ -z "$dx_val" ] && final_dx=0 || final_dx=$dx_val
-            [ "$dy_val" = "auto" ] || [ -z "$dy_val" ] && final_dy=$(( screen_h * 5 / 100 )) || final_dy=$dy_val
+            if [ "$w_val" = "auto" ] || [ -z "$w_val" ]; then
+                final_w=$(( screen_w * 70 / 100 ))
+            else
+                final_w=$w_val
+            fi
+            if [ "$h_val" = "auto" ] || [ -z "$h_val" ]; then
+                final_h=$(( screen_h * 50 / 100 ))
+            else
+                final_h=$h_val
+            fi
+            if [ "$dx_val" = "auto" ] || [ -z "$dx_val" ]; then
+                final_dx=0
+            else
+                final_dx=$dx_val
+            fi
+            if [ "$dy_val" = "auto" ] || [ -z "$dy_val" ]; then
+                final_dy=$(( screen_h * 5 / 100 ))
+            else
+                final_dy=$dy_val
+            fi
         fi
         
         local left=$(( idx * final_dx ))
         local top=$(( idx * final_dy ))
         local right=$(( left + final_w ))
         local bottom=$(( top + final_h ))
-        freeform_args="--windowingMode 5 --launch-bounds $left,$top,$right,$bottom"
+        freeform_args="--windowingMode 5 --launch-bounds $left $top $right $bottom"
+        bounds_args=("$left" "$top" "$right" "$bottom")
     fi
 
     # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
-    am start $freeform_args -a android.intent.action.VIEW -d "$link" -p "$pkg" > /dev/null 2>&1
+    ANDROID_EXECUTOR=direct android_start_uri "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
     local ret=$?
 
     # 2. Nếu thất bại, thử chạy qua run_cmd (su/adb) kèm theo --user 0
     if [ $ret -ne 0 ]; then
-        run_cmd "am start --user 0 $freeform_args -a android.intent.action.VIEW -d \"$link\" -p $pkg" > /dev/null 2>&1
+        android_start_uri_for_user 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
     fi
 
     # 3. Cách 2: am start không chỉ định package (quyền Termux user)
     if [ $ret -ne 0 ]; then
-        am start $freeform_args -a android.intent.action.VIEW -d "$link" > /dev/null 2>&1
+        ANDROID_EXECUTOR=direct android_start_uri "" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
     fi
 
     # 4. Cách 2 (su/adb): am start không chỉ định package kèm theo --user 0
     if [ $ret -ne 0 ]; then
-        run_cmd "am start --user 0 $freeform_args -a android.intent.action.VIEW -d \"$link\"" > /dev/null 2>&1
+        android_start_uri_for_user 0 "" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
     fi
 
     # 5. Cách 3: Mở thẳng MainActivity
     if [ $ret -ne 0 ]; then
-        am start $freeform_args -n "$pkg/.MainActivity" > /dev/null 2>&1 ||
-        run_cmd "am start --user 0 $freeform_args -n $pkg/.MainActivity" > /dev/null 2>&1 ||
-        run_cmd "monkey -p $pkg 1" > /dev/null 2>&1
+        ANDROID_EXECUTOR=direct android_start_activity "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_start_activity_for_user 0 "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_monkey_package "$pkg" > /dev/null 2>&1
     fi
 
     LAST_RESTART=$(date +%s)
@@ -371,9 +481,7 @@ launch_roblox() {
 
 # ── Kiểm tra mạng ────────────────────────────────────────
 check_internet() {
-    ping -c 1 -W 2 1.1.1.1 > /dev/null 2>&1 ||
-    ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1 ||
-    curl -s --connect-timeout 2 http://www.google.com > /dev/null 2>&1
+    network_is_online
 }
 
 # ── Kiểm tra Roblox đang chạy (đa phương thức) ───────────
@@ -399,38 +507,38 @@ is_roblox_running() {
             grep -q "$pkg" "${TMP_DIR}/roblox_windows.txt" && return 0
         fi
         # Fallback check nhanh không cần dumpsys
-        run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
+        android_pgrep_package "$pkg" > /dev/null 2>&1 && return 0
         local ps_out
-        ps_out=$(run_cmd "ps -A" 2>/dev/null)
-        [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+        ps_out=$(android_ps -A 2>/dev/null)
+        [ -z "$ps_out" ] && ps_out=$(android_ps 2>/dev/null)
         echo "$ps_out" | grep -q "$pkg" && return 0
         return 1
     fi
 
     # 2. Phương thức trực tiếp (pgrep nhẹ nhất check trước)
-    run_cmd "pgrep -f $pkg" > /dev/null 2>&1 && return 0
+    android_pgrep_package "$pkg" > /dev/null 2>&1 && return 0
 
     local act_out
-    act_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+    act_out=$(android_dumpsys activity activities 2>/dev/null)
     if [ -n "$act_out" ]; then
         echo "$act_out" | grep -q "$pkg" && return 0
     fi
 
     local win_out
-    win_out=$(run_cmd "dumpsys window windows" 2>/dev/null)
+    win_out=$(android_dumpsys window windows 2>/dev/null)
     if [ -n "$win_out" ]; then
         echo "$win_out" | grep -q "$pkg" && return 0
     fi
 
     local pkg_out
-    pkg_out=$(run_cmd "dumpsys package $pkg" 2>/dev/null | grep -i 'proc\|pid')
+    pkg_out=$(android_dumpsys package "$pkg" 2>/dev/null | grep -i 'proc\|pid')
     if echo "$pkg_out" | grep -qi 'foreground\|perceptible\|visible'; then
         return 0
     fi
 
     local ps_out
-    ps_out=$(run_cmd "ps -A" 2>/dev/null)
-    [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+    ps_out=$(android_ps -A 2>/dev/null)
+    [ -z "$ps_out" ] && ps_out=$(android_ps 2>/dev/null)
     echo "$ps_out" | grep -q "$pkg" && return 0
 
     return 1
@@ -461,13 +569,13 @@ is_in_game() {
 
     # 2. Phương thức trực tiếp
     local act_out
-    act_out=$(run_cmd "dumpsys activity activities" 2>/dev/null)
+    act_out=$(android_dumpsys activity activities 2>/dev/null)
     if [ -n "$act_out" ]; then
         echo "$act_out" | grep -i "$pkg" | grep -qi "GameActivity" && return 0
     fi
 
     local win_out
-    win_out=$(run_cmd "dumpsys window windows" 2>/dev/null)
+    win_out=$(android_dumpsys window windows 2>/dev/null)
     if [ -n "$win_out" ]; then
         echo "$win_out" | grep -i "$pkg" | grep -qi "GameActivity" && return 0
     fi
@@ -481,21 +589,21 @@ check_roblox_log_for_disconnect() {
     local log_dir=""
 
     # Sử dụng ls -d để kiểm tra sự tồn tại của thư mục (tránh lỗi mã thoát su -c trên một số dòng máy)
-    if [ -n "$(run_cmd "ls -d /sdcard/Android/data/$pkg/files/logs 2>/dev/null" | tr -d '\r\n')" ]; then
+    if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
         log_dir="/sdcard/Android/data/$pkg/files/logs"
-    elif [ -n "$(run_cmd "ls -d /data/data/$pkg/files/logs 2>/dev/null" | tr -d '\r\n')" ]; then
+    elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
         log_dir="/data/data/$pkg/files/logs"
     fi
 
     [ -z "$log_dir" ] && return 1
 
     local latest_log
-    latest_log=$(run_cmd "ls -t $log_dir 2>/dev/null | head -n 1" 2>/dev/null | tr -d '\r\n')
+    latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '\r\n')
     [ -z "$latest_log" ] && return 1
 
     # Kiểm tra thời gian sửa đổi của log file để tránh nhận nhầm log của phiên chơi cũ trước đó
     local mtime
-    mtime=$(run_cmd "stat -c %Y $log_dir/$latest_log 2>/dev/null || stat -f %m $log_dir/$latest_log 2>/dev/null" | tr -d '\r\n')
+    mtime=$(android_stat_mtime "$log_dir/$latest_log" 2>/dev/null | tr -d '\r\n')
     # Thêm sai số 30 giây để xử lý tình trạng trễ đồng bộ của hệ thống tệp tin Android
     if [ -n "$mtime" ] && [ "$((mtime + 30))" -lt "${LAST_LAUNCH:-0}" ]; then
         # File log chưa được cập nhật cho phiên chơi mới, bỏ qua
@@ -503,7 +611,7 @@ check_roblox_log_for_disconnect() {
     fi
 
     local log_tail
-    log_tail=$(run_cmd "tail -n 150 $log_dir/$latest_log" 2>/dev/null)
+    log_tail=$(android_tail_lines 150 "$log_dir/$latest_log" 2>/dev/null)
     [ -z "$log_tail" ] && return 1
 
     # Sử dụng grep -E -i (Extended Regex) tương thích tuyệt đối với Toybox/Busybox của Android
@@ -519,141 +627,7 @@ check_roblox_log_for_disconnect() {
 #  CHẾ ĐỘ --run : VÒNG LẶP GIÁM SÁT (chạy trong tmux)
 # ══════════════════════════════════════════════════════════
 start_bot() {
-    load_config
-    init_executor
-    local win_name="${ROBLOX_PACKAGE//./_}"
-    local pid_file="${TMP_DIR}/roblox_bot_${win_name}.pid"
-    echo "$$" > "$pid_file"
-    trap 'rm -f "$pid_file"' EXIT INT TERM
-
-    clear
-    echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${BGRN}║   ROBLOX AUTO REJOIN - ĐANG CHẠY NGẦM  ║${NC}"
-    echo -e "${BGRN}╚══════════════════════════════════════════╝${NC}"
-    echo -e " ${GRN}Package :${NC} $ROBLOX_PACKAGE"
-    echo -e " ${GRN}PlaceID :${NC} $PLACE_ID  ${GRN}Private:${NC} ${PRIVATE_CODE:-Không}"
-    echo -e " ${GRN}Executor:${NC} $EXECUTOR  ${GRN}Anti-AFK:${NC} $ANTI_AFK"
-    echo -e "${BGRN}══════════════════════════════════════════${NC}"
-    log_msg "${GRN}[START]${NC} Bot khởi động, bắt đầu giám sát..."
-    beep_ok
-
-    launch_roblox
-
-    while true; do
-        sleep "$CHECK_INTERVAL"
-
-        # [0] Kiểm tra mạng
-        if ! check_internet; then
-            log_msg "${RED}[NET]${NC} Mất kết nối Internet! Chờ mạng..."
-            beep_warn
-            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Mất kết nối Internet!"
-            while ! check_internet; do sleep 10; done
-            log_msg "${GRN}[NET]${NC} Có mạng lại! Khởi động game..."
-            beep_ok
-            send_discord "📶 **[$ROBLOX_PACKAGE]** Có mạng, đang vào game!"
-            run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
-            sleep 3
-            inc_rejoin_count "$ROBLOX_PACKAGE"
-            launch_roblox
-            continue
-        fi
-
-        # [1] Kiểm tra trạng thái chạy & In-game (Chờ grace period sau khi launch)
-        local NOW_CHK; NOW_CHK=$(date +%s)
-        if [ $(( NOW_CHK - LAST_LAUNCH )) -lt "$LAUNCH_GRACE" ]; then
-            local remaining=$(( LAUNCH_GRACE - NOW_CHK + LAST_LAUNCH ))
-            log_msg "${CYN}[WAIT]${NC} Đang chờ game tải... (${remaining}s còn lại)"
-            continue
-        fi
-
-        if ! is_roblox_running; then
-            local cnt; cnt=$(get_rejoin_count "$ROBLOX_PACKAGE")
-            log_msg "${RED}[CRASH]${NC} Game bị tắt/crash! Rejoin lần #$((cnt+1))..."
-            beep_warn
-            send_discord "💥 **[$ROBLOX_PACKAGE]** Crash! Rejoin lần #$((cnt+1))..."
-            run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
-            sleep 3
-            inc_rejoin_count "$ROBLOX_PACKAGE"
-            LOBBY_RETRY_COUNT=0
-            launch_roblox
-            continue
-        fi
-
-        # Kiểm tra mất kết nối hoặc bị kick từ Log của Roblox
-        if check_roblox_log_for_disconnect; then
-            local cnt; cnt=$(get_rejoin_count "$ROBLOX_PACKAGE")
-            log_msg "${RED}[DISCONNECT]${NC} Phát hiện mất kết nối/kick từ log Roblox! Rejoin lần #$((cnt+1))..."
-            beep_warn
-            send_discord "🚨 **[$ROBLOX_PACKAGE]** Mất kết nối hoặc bị Kick! Đang Rejoin lần #$((cnt+1))..."
-            run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
-            sleep 3
-            inc_rejoin_count "$ROBLOX_PACKAGE"
-            LOBBY_RETRY_COUNT=0
-            launch_roblox
-            continue
-        fi
-
-        # Nếu game chạy, kiểm tra xem đã vào map chưa (GameActivity)
-        if is_in_game; then
-            LAST_IN_GAME=$NOW_CHK
-            if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
-                log_msg "${GRN}[GAME]${NC} Đã vào game thành công! Reset bộ đếm sảnh."
-                LOBBY_RETRY_COUNT=0
-            fi
-
-            # Tap kích hoạt màn hình khi game vừa tải xong lần đầu
-            if [ "$TAP_ON_LOAD_DONE" = "false" ]; then
-                log_msg "${GRN}[LOAD]${NC} Game đã tải xong! Thực hiện tap kích hoạt tại ($TAP_X, $TAP_Y)..."
-                run_cmd "input tap $TAP_X $TAP_Y" > /dev/null 2>&1
-                TAP_ON_LOAD_DONE=true
-                LAST_AFK_TAP=$NOW_CHK  # Đồng bộ thời gian tap AFK
-            fi
-        else
-            local time_stuck=$(( NOW_CHK - LAST_IN_GAME ))
-            if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
-                if [ "$LOBBY_RETRY_COUNT" -lt 3 ]; then
-                    LOBBY_RETRY_COUNT=$(( LOBBY_RETRY_COUNT + 1 ))
-                    log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh ${time_stuck}s! Gửi lại deep-link (Lần thử $LOBBY_RETRY_COUNT/3)..."
-                    send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh ${time_stuck}s. Đang gửi lại deep-link (Thử lần $LOBBY_RETRY_COUNT/3)..."
-                    launch_roblox
-                else
-                    log_msg "${RED}[LOBBY]${NC} Kẹt ở sảnh quá lâu (> 3 lần thử)! Tiến hành khởi động lại game..."
-                    send_discord "🚨 **[$ROBLOX_PACKAGE]** Kẹt ở sảnh quá lâu. Khởi động lại game!"
-                    run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
-                    sleep 3
-                    inc_rejoin_count "$ROBLOX_PACKAGE"
-                    LOBBY_RETRY_COUNT=0
-                    launch_roblox
-                fi
-                continue
-            else
-                local time_left=$(( IN_GAME_TIMEOUT - time_stuck ))
-                log_msg "${YLW}[LOBBY]${NC} Đang ở sảnh/loading, chờ vào map... (${time_left}s còn lại)"
-            fi
-        fi
-
-        # [2] Anti-AFK
-        if [ "$ANTI_AFK" = "true" ]; then
-            local NOW_AFK; NOW_AFK=$(date +%s)
-            if [ $(( NOW_AFK - LAST_AFK_TAP )) -ge "$AFK_TAP_INTERVAL" ]; then
-                log_msg "${CYN}[AFK]${NC} Gửi tap tại ($TAP_X, $TAP_Y)"
-                run_cmd "input tap $TAP_X $TAP_Y" > /dev/null 2>&1
-                LAST_AFK_TAP=$NOW_AFK
-            fi
-        fi
-
-        # [3] Auto Restart định kỳ
-        if [ "${AUTO_RESTART_PERIOD:-0}" -gt 0 ]; then
-            local NOW_RST; NOW_RST=$(date +%s)
-            if [ $(( NOW_RST - LAST_RESTART )) -ge "$AUTO_RESTART_PERIOD" ]; then
-                log_msg "${YLW}[RESTART]${NC} Restart định kỳ (${AUTO_RESTART_PERIOD}s)..."
-                send_discord "🔄 **[$ROBLOX_PACKAGE]** Auto restart định kỳ."
-                run_cmd "am force-stop $ROBLOX_PACKAGE" > /dev/null 2>&1
-                sleep 3
-                launch_roblox
-            fi
-        fi
-    done
+    monitor_run
 }
 
 # ══════════════════════════════════════════════════════════
@@ -710,16 +684,16 @@ draw_main_status() {
         ps_snapshot=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
     else
         # Khong co shared cache -> dung ps, tuyet doi KHONG goi dumpsys o day
-        ps_snapshot=$(run_cmd "ps -A" 2>/dev/null)
-        [ -z "$ps_snapshot" ] && ps_snapshot=$(run_cmd "ps" 2>/dev/null)
+        ps_snapshot=$(android_ps -A 2>/dev/null)
+        [ -z "$ps_snapshot" ] && ps_snapshot=$(android_ps 2>/dev/null)
     fi
 
     local total_online=0 total_acc=0
 
-    # Chieu rong cot: #(3) | pkg(29) | user(10) | game(9) | bot(8) | rejoin(8)
-    echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
-    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name                ${BGRN}|${NC} USERNAME   ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
-    echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
+    # Chieu rong cot: #(3) | pkg(31) | user(10) | game(9) | bot(8) | rejoin(8)
+    echo -e "${BGRN}+---+-------------------------------+------------+-----------+----------+----------+${NC}"
+    echo -e "${BGRN}|${NC} # ${BGRN}|${NC} Package Name                  ${BGRN}|${NC} USERNAME   ${BGRN}|${NC} GAME      ${BGRN}|${NC} BOT      ${BGRN}|${NC} REJOIN   ${BGRN}|${NC}"
+    echo -e "${BGRN}+---+-------------------------------+------------+-----------+----------+----------+${NC}"
 
     if [ -z "$cfgs" ]; then
         echo -e "${BGRN}|${NC}  ${RED}Chua co acc nao! Chay [1] Setup truoc.${NC}                                  ${BGRN}|${NC}"
@@ -756,10 +730,10 @@ draw_main_status() {
 
             # So lan rejoin
             local rj_cnt; rj_cnt=$(get_rejoin_count "$pkg")
-            local short_pkg="${pkg:0:27}"
+            local short_pkg="${pkg:0:29}"
 
             # In hang du lieu - tach ma ANSI ra khoi %-format de printf tinh dung chieu rong
-            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-27s ${BGRN}|${NC} %-10s ${BGRN}|${NC} " \
+            printf "${BGRN}|${NC} %-2s${BGRN}|${NC} %-29s ${BGRN}|${NC} %-10s ${BGRN}|${NC} " \
                 "$idx" "$short_pkg" "$uname"
             printf "${game_color}%-9s${NC} ${BGRN}|${NC} ${bot_color}%-8s${NC} ${BGRN}|${NC} %-8s ${BGRN}|${NC}\n" \
                 "$game_text" "$bot_text" "${rj_cnt} lan"
@@ -768,7 +742,7 @@ draw_main_status() {
         done
     fi
 
-    echo -e "${BGRN}+---+-----------------------------+------------+-----------+----------+----------+${NC}"
+    echo -e "${BGRN}+---+-------------------------------+------------+-----------+----------+----------+${NC}"
     echo -e " ${GRN}Tong:${NC} ${BGRN}$total_online${NC}/${total_acc} acc ONLINE"
 }
 
@@ -847,11 +821,11 @@ view_clone_detail() {
         ps_out=$(cat "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
     else
         # Fallback nhanh: pgrep hoac ps, khong dung dumpsys
-        if run_cmd "pgrep -f $pkg" > /dev/null 2>&1; then
+        if android_pgrep_package "$pkg" > /dev/null 2>&1; then
             ps_out="$pkg"  # gia tri truoc cho kiem tra grep phia duoi
         else
-            ps_out=$(run_cmd "ps -A" 2>/dev/null)
-            [ -z "$ps_out" ] && ps_out=$(run_cmd "ps" 2>/dev/null)
+            ps_out=$(android_ps -A 2>/dev/null)
+            [ -z "$ps_out" ] && ps_out=$(android_ps 2>/dev/null)
         fi
     fi
     local game_s="${RED}OFFLINE${NC}"
@@ -901,7 +875,7 @@ view_clone_detail() {
             fi
             ;;
         2)
-            run_cmd "am force-stop $pkg" > /dev/null 2>&1
+            android_force_stop "$pkg" > /dev/null 2>&1
             tmux send-keys -t "roblox-multi:${win_name}" "q" 2>/dev/null
             echo -e "${RED}  ✓ Đã dừng acc $pkg${NC}"
             beep_warn
@@ -1027,7 +1001,9 @@ action_discord() {
     echo -e "${BGRN}╔══════════════════════════════════════════════╗${NC}"
     echo -e "${BGRN}║          DISCORD WEBHOOK                     ║${NC}"
     echo -e "${BGRN}╠══════════════════════════════════════════════╣${NC}"
-    printf  "${BGRN}║${NC}  Webhook: ${YLW}%-36s${NC}${BGRN}║${NC}\n" "${DISCORD_WEBHOOK:-Chưa cài đặt}"
+    local webhook_display="${DISCORD_WEBHOOK:-Chưa cài đặt}"
+    [ -n "$DISCORD_WEBHOOK" ] && webhook_display="$(notification_redact_webhook "$DISCORD_WEBHOOK")"
+    printf  "${BGRN}║${NC}  Webhook: ${YLW}%-36s${NC}${BGRN}║${NC}\n" "$webhook_display"
     echo -e "${BGRN}╚══════════════════════════════════════════════╝${NC}"
     echo ""
     echo -ne "${WHT}  URL mới (Enter giữ, 'none' xóa): ${NC}"
@@ -1091,7 +1067,7 @@ action_stop_all() {
         [ -f "$cfg" ] || continue
         local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
         [ -z "$pkg" ] && continue
-        run_cmd "am force-stop $pkg" > /dev/null 2>&1
+        android_force_stop "$pkg" > /dev/null 2>&1
         echo -e "${RED}  ✓ Dừng: $pkg${NC}"
     done
 

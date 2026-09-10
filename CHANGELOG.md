@@ -1,0 +1,136 @@
+# Changelog
+
+## Unreleased
+
+### Added
+- Phase 4D signed auto-update foundation.
+- `lib/updater.sh` with signed manifest checks, semantic version comparison, artifact download, SHA256 and size verification, archive path validation, staging self-test, backup, apply, rollback, cleanup, and update locking.
+- `roblox-manager update check`, `update status`, `update --yes`, and `self-test`.
+- Update doctor checks for jq, OpenSSL, SHA256 tooling, tar, manifest URL, public key, and writable update storage.
+- `scripts/build-release.sh`, `scripts/sign-release.sh`, `UPDATE_ARCHITECTURE.md`, and `RELEASE_PROCESS.md`.
+- Updater regression tests for signature, SHA256, size, HTTP policy, archive traversal, active monitor blocking, update locking, successful update, self-test failure, rollback success, and rollback failure handling.
+- Phase 4C.2 production license enforcement readiness.
+- Central entitlement enforcement module in `lib/entitlement.sh`.
+- `disabled`, `optional`, and `required` license modes with safe `LICENSE_MODE` config parsing.
+- Monitor feature gate and maxInstances admission checks using runtime lock state.
+- Short-lived admission lock to prevent concurrent starts bypassing maxInstances.
+- Installer entitlement gate before APK download.
+- Profile entitlement gate without deleting existing profiles.
+- Discord entitlement gate with one-time warning behavior.
+- Backend maintenance response fields controlled by `LICENSE_MAINTENANCE_MODE`, `LICENSE_MAINTENANCE_ALLOW_CACHE`, and `LICENSE_MAINTENANCE_MESSAGE`.
+- Entitlement regression tests for modes, feature gates, maxInstances, offline grace, revocation, expiry, and maintenance cache policy.
+- Phase 4B license authority backend under `server/`.
+- Express API endpoints for `/api/v1/health`, license activation, validation, and deactivation.
+- MySQL migrations for `licenses`, `license_devices`, `license_tokens`, and `license_events`.
+- `mysql2/promise` repository using prepared statements and activation transactions.
+- HMAC-SHA256 license key hashing with `LICENSE_KEY_PEPPER`.
+- Opaque client tokens generated from secure randomness and stored as SHA-256 hashes.
+- Central plan entitlements separating license device slots from Roblox instance entitlement.
+- zod request validation, 16kb JSON body limit, helmet, and configurable rate limits.
+- Backend audit events without raw key/token logging.
+- `server/scripts/create-license.js` development license generator that prints the raw key once.
+- Backend automated tests for health, activation, validation, deactivation, entitlements, device limits, concurrency, malformed JSON, and injection-like input rejection.
+- Opt-in real MySQL integration test for activation, validation, deactivation, post-deactivation revocation, and hashed token storage.
+- `server/README.md` and `SERVER_ARCHITECTURE.md`.
+- Phase 4A license client foundation in `lib/license.sh`.
+- `roblox-manager license activate`, `validate`, `status`, and `deactivate`.
+- Random installation id generation with corrupt-id backup.
+- Local license cache with status, plan, expiry, feature entitlements, max instances, revalidation interval, server time, and opaque token.
+- Offline grace and clock-rollback revalidation behavior.
+- License doctor checks for mode, API, jq, installation id, cache, and activation state.
+- `LICENSE_ARCHITECTURE.md` documenting the trust model, API contract, token/cache strategy, offline grace, entitlements, and Phase 4B backend notes.
+- Mock license server and license regression tests.
+- Phase 3B installer hardening: visible installer state/progress flow, `.part` downloads, unique temp job directories, disk-space checks, metadata parsing, version classification, and post-install version verification.
+- `--yes`, `--allow-downgrade`, `--allow-custom-package`, and `--keep-apk` installer options.
+- Doctor checks for APK metadata tooling, signature tooling, root/ADB/pm command presence, `flock`, writable temp storage, and disk-space information.
+- Setup wizard installer offer when Roblox is not detected.
+- `REAL_DEVICE_TEST_CHECKLIST.md` for manual Termux / UGPhone validation.
+- Phase 3A safe Roblox APK installer in `lib/installer.sh`.
+- `roblox-manager install-roblox` with `--expected-package`, `--sha256`, `--max-size-mb`, and `--dry-run`.
+- Android APK install wrapper supporting direct/root `pm install -r` and ADB `adb install -r`.
+- Installer regression tests with fake download, fake package inspection, fake signature verification, and fake install verification.
+- Phase 2C profile manager in `lib/profile.sh`.
+- `roblox-manager profile list`, `create`, `show`, and `apply`.
+- `PROFILE` metadata support in the safe config loader.
+- Profile regression tests.
+- Phase 2B diagnostics module in `lib/doctor.sh`.
+- Phase 2B setup wizard helpers in `lib/ui.sh`.
+- `roblox-manager doctor` with text and env output modes.
+- `roblox-manager setup` with interactive and non-interactive modes.
+- Doctor and setup wizard regression tests.
+- Phase 2A Roblox parser module in `lib/roblox.sh`.
+- `roblox-manager` CLI foundation with `help`, `version`, `parse-link`, `status`, and `start`.
+- `VERSION` file for CLI version reporting.
+- Parser and CLI regression tests.
+- Project status and progress tracking documents.
+
+### Changed
+- `setup.sh` now bootstraps `lib/updater.sh`.
+- `roblox-manager help` now includes update and self-test commands.
+- `roblox-manager install-roblox` checks the Installer entitlement before starting URL/download/install work when license mode is required.
+- `roblox-manager profile` checks the Profiles entitlement for non-help profile commands when license mode is required.
+- `auto_rejoin.sh` loads the license and entitlement modules before monitor start.
+- `lib/license.sh` keeps an existing token when validation succeeds without token rotation.
+- Backend MySQL integration now exercises Express API routes and entitlement updates from the database.
+- `LICENSE_ARCHITECTURE.md` now documents the implemented Phase 4B backend contract and compatibility response shape.
+- README now documents the Phase 4B backend setup and license generation flow.
+- `roblox-manager help` now includes the license command group.
+- `setup.sh` now bootstraps `lib/license.sh`.
+- `roblox-manager version` now prints `Auto Rejoin Pro <VERSION>` and marks dev builds as development builds.
+- `network_download_secure_https` now uses curl HTTPS-only protocol and redirect policy when available.
+- `android_install_apk` can pass downgrade flags only when explicitly requested.
+- README now documents installer security model, upgrade/downgrade behavior, doctor, setup installer flow, and troubleshooting.
+- `setup.sh` now bootstraps `lib/installer.sh`.
+- `setup.sh` now bootstraps `lib/profile.sh`.
+- Profile apply writes legacy-compatible `config_<target>.cfg` files for existing multi-clone flows.
+- `setup.sh` now bootstraps `lib/doctor.sh` and `lib/ui.sh`.
+- `auto_rejoin.sh` now builds Roblox launch URIs through the parser module before opening Roblox.
+- `setup.sh` now bootstraps the parser library, CLI entrypoint, and version file.
+
+### Security
+- Updates require a digitally signed manifest and verified artifact hash before apply.
+- `--yes` only bypasses confirmation; it does not bypass signature, SHA256, size, archive, or self-test checks.
+- Production update URLs must use HTTPS unless the explicit HTTP development override is enabled.
+- Release archives with traversal paths, symlinks, `.env`, config, logs, tmp, node_modules, or license/user state paths are rejected before extraction.
+- Updater refuses to run while monitor locks are active and does not kill Roblox sessions.
+- Production signing private-key locations are ignored by git.
+- Required license mode gates new privileged actions but does not kill existing Roblox processes on server outage.
+- Fresh revoked/expired server responses override stale valid cache for new privileged operations.
+- Offline grace is used only for network/server outage classes, not authority revocation/expiry.
+- maxInstances reductions block new starts without force-killing existing running instances.
+- Backend license keys are not stored as plaintext.
+- Backend client tokens are not stored as plaintext.
+- Activation uses a transaction-safe repository flow with license row locking for device-slot enforcement.
+- Backend SQL uses prepared statements and rejects malformed/oversized request bodies.
+- Backend errors avoid stack traces outside development and avoid DB credential leakage.
+- License mode is optional by default and does not lock users out while the backend is pending.
+- License API URLs must use HTTPS unless the explicit HTTP dev override is enabled.
+- License activation validates key format before network calls.
+- License CLI output masks keys and does not print opaque tokens.
+- The local license cache does not store raw license keys, Roblox credentials, cookies, or `.ROBLOSECURITY`.
+- Partial downloads are written to `.part` files and are never installed.
+- Installer blocks same-version reinstall without `--yes` and downgrade without `--allow-downgrade`.
+- Installer does not automatically uninstall Roblox on install failure.
+- Signature verification output distinguishes verified from unavailable.
+- Installer requires HTTPS APK URLs and rejects unsupported URL characters before any download.
+- Installer validates file size, APK ZIP magic, Roblox package metadata via `aapt`, SHA256, optional expected SHA, and signature when available before install.
+- Installer does not install when package metadata cannot be read.
+- Profile names and apply targets are validated before any file path is built.
+- `roblox-manager profile show` redacts Discord webhook values and skips credential-like lines.
+- Setup wizard validates links through the safe offline parser before writing config.
+- Existing config files are backed up before wizard overwrite.
+- Roblox links are parsed offline with strict host, scheme, Place ID, and private server code validation.
+- The parser does not fetch Roblox pages and does not store Roblox passwords, cookies, or `.ROBLOSECURITY`.
+- Invalid or unsupported links fail closed before launch.
+
+### Verification
+- Updater regression suite passed: 42 assertions, 0 failed.
+- `bash -n` passed for project shell files.
+- Full shell test suite passed: 498 assertions, 0 failed.
+- Backend `npm run check` passed.
+- Backend `npm test` passed: 12 tests, 0 failed, 1 opt-in MySQL test skipped by default.
+- Backend `npm run migrate` applied `001_create_license_tables.sql` against `auto_rejoin_license_test`.
+- Backend `npm run test:mysql` passed: 1 real MySQL integration test, 0 failed.
+- Backend production dependency audit passed: 0 vulnerabilities.
+- Real-device validation is pending.
+- `shellcheck` was not available in the environment.

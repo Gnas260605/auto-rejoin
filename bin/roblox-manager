@@ -1,0 +1,618 @@
+#!/usr/bin/env bash
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VERSION_FILE="${PROJECT_DIR}/VERSION"
+
+ROBLOX_LIB="${PROJECT_DIR}/lib/roblox.sh"
+if [ ! -f "$ROBLOX_LIB" ]; then
+    echo "Error: missing Roblox library: $ROBLOX_LIB" >&2
+    exit 2
+fi
+# shellcheck source=../lib/roblox.sh
+source "$ROBLOX_LIB"
+
+CONFIG_LIB="${PROJECT_DIR}/lib/config.sh"
+ANDROID_LIB="${PROJECT_DIR}/lib/android.sh"
+NETWORK_LIB="${PROJECT_DIR}/lib/network.sh"
+DOCTOR_LIB="${PROJECT_DIR}/lib/doctor.sh"
+UI_LIB="${PROJECT_DIR}/lib/ui.sh"
+PROFILE_LIB="${PROJECT_DIR}/lib/profile.sh"
+INSTALLER_LIB="${PROJECT_DIR}/lib/installer.sh"
+LICENSE_LIB="${PROJECT_DIR}/lib/license.sh"
+ENTITLEMENT_LIB="${PROJECT_DIR}/lib/entitlement.sh"
+UPDATER_LIB="${PROJECT_DIR}/lib/updater.sh"
+
+for manager_lib in "$CONFIG_LIB" "$ANDROID_LIB" "$NETWORK_LIB" "$DOCTOR_LIB" "$UI_LIB" "$PROFILE_LIB" "$INSTALLER_LIB" "$LICENSE_LIB" "$ENTITLEMENT_LIB" "$UPDATER_LIB"; do
+    if [ ! -f "$manager_lib" ]; then
+        echo "Error: missing manager library: $manager_lib" >&2
+        exit 2
+    fi
+    # shellcheck source=/dev/null
+    source "$manager_lib"
+done
+
+manager_version() {
+    local version
+    if [ -f "$VERSION_FILE" ]; then
+        version="$(tr -d '\r\n' < "$VERSION_FILE")"
+    else
+        version="0.0.0-dev"
+    fi
+    printf 'Auto Rejoin Pro %s\n' "$version"
+    case "$version" in
+        *dev*|*alpha*|*beta*) printf 'Build: development\n' ;;
+    esac
+}
+
+manager_help() {
+    cat <<'EOF'
+roblox-manager - Auto Rejoin CLI
+
+Usage:
+  roblox-manager help
+  roblox-manager version
+  roblox-manager parse-link [--format env|--quiet] <URL_OR_PLACE_ID>
+  roblox-manager doctor [--format text|env] [--skip-network]
+  roblox-manager setup [--non-interactive --link URL --package PACKAGE]
+  roblox-manager profile list|create|show|apply
+  roblox-manager install-roblox [options] <HTTPS_APK_URL>
+  roblox-manager license activate|validate|status|deactivate
+  roblox-manager update check|status|[--yes]
+  roblox-manager support-bundle [--output PATH]
+  roblox-manager self-test
+  roblox-manager status
+  roblox-manager start
+
+Commands:
+  help        Show this help.
+  version     Print tool version.
+  parse-link  Parse a Roblox game/private-server URL or roblox:// URI.
+  doctor      Check local commands, project files, config, network, and Android access.
+  setup       Create or update config.env with a safe setup wizard.
+  profile     Manage reusable monitor profiles under config/profiles.
+  install-roblox
+              Download to .part, validate, hash, install, and verify a Roblox APK.
+  license     Activate, validate, inspect, or deactivate a local license cache.
+  update      Check for, inspect, or install a signed release update.
+  support-bundle
+              Generate a sanitized diagnostics tarball for troubleshooting.
+  self-test   Run local syntax/module checks without Android, network, or license.
+  status      Delegate to compatibility menu/status entrypoint.
+  start       Delegate to compatibility setup/start flow.
+EOF
+}
+
+manager_parse_link() {
+    local format="human"
+    local input=""
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --format)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --format requires a value" >&2; return 2; }
+                case "$1" in
+                    env|human) format="$1" ;;
+                    *) echo "Error: unsupported format: $1" >&2; return 2 ;;
+                esac
+                ;;
+            --quiet)
+                format="env"
+                ;;
+            --help|-h)
+                echo "Usage: roblox-manager parse-link [--format env|--quiet] <URL_OR_PLACE_ID>"
+                return 0
+                ;;
+            -*)
+                echo "Error: unknown parse-link option: $1" >&2
+                return 2
+                ;;
+            *)
+                if [ -n "$input" ]; then
+                    echo "Error: parse-link accepts exactly one input" >&2
+                    return 2
+                fi
+                input="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$input" ] || { echo "Error: missing URL or Place ID" >&2; return 2; }
+    if ! roblox_parse_link "$input"; then
+        echo "Error: invalid Roblox link: ${ROBLOX_PARSE_ERROR:-parse failed}" >&2
+        return 1
+    fi
+
+    if [ "$format" = "env" ]; then
+        roblox_print_parse_env
+        return 0
+    fi
+
+    case "$ROBLOX_LINK_TYPE" in
+        game)
+            printf 'Type     : game\n'
+            printf 'Place ID : %s\n' "$ROBLOX_PARSED_PLACE_ID"
+            printf 'URI      : %s\n' "$ROBLOX_PARSED_URI"
+            ;;
+        private_server)
+            printf 'Type         : private_server\n'
+            printf 'Private Code : %s\n' "$ROBLOX_PARSED_PRIVATE_CODE"
+            printf 'URI          : %s\n' "$ROBLOX_PARSED_URI"
+            ;;
+    esac
+}
+
+manager_doctor() {
+    local format="text"
+    local config_file="${PROJECT_DIR}/config.env"
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --format)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --format requires a value" >&2; return 2; }
+                case "$1" in
+                    text|env) format="$1" ;;
+                    *) echo "Error: unsupported format: $1" >&2; return 2 ;;
+                esac
+                ;;
+            --config-file)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --config-file requires a value" >&2; return 2; }
+                config_file="$1"
+                ;;
+            --skip-network)
+                DOCTOR_SKIP_NETWORK=true
+                ;;
+            --help|-h)
+                echo "Usage: roblox-manager doctor [--format text|env] [--config-file FILE] [--skip-network]"
+                return 0
+                ;;
+            *)
+                echo "Error: unknown doctor option: $1" >&2
+                return 2
+                ;;
+        esac
+        shift
+    done
+
+    doctor_run "$PROJECT_DIR" "$config_file" "$format"
+}
+
+manager_setup() {
+    local config_file="${PROJECT_DIR}/config.env"
+    local link=""
+    local package=""
+    local webhook=""
+    local anti_afk="true"
+    local non_interactive="false"
+    local install_apk_url=""
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --non-interactive)
+                non_interactive="true"
+                ;;
+            --link)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --link requires a value" >&2; return 2; }
+                link="$1"
+                ;;
+            --package)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --package requires a value" >&2; return 2; }
+                package="$1"
+                ;;
+            --discord-webhook)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --discord-webhook requires a value" >&2; return 2; }
+                webhook="$1"
+                ;;
+            --anti-afk)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --anti-afk requires a value" >&2; return 2; }
+                anti_afk="$1"
+                ;;
+            --install-apk-url)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --install-apk-url requires a value" >&2; return 2; }
+                install_apk_url="$1"
+                ;;
+            --config-file)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --config-file requires a value" >&2; return 2; }
+                config_file="$1"
+                ;;
+            --help|-h)
+                cat <<'EOF'
+Usage:
+  roblox-manager setup
+  roblox-manager setup --non-interactive --link URL_OR_PLACE_ID [--package PACKAGE] [--config-file FILE]
+EOF
+                return 0
+                ;;
+            *)
+                echo "Error: unknown setup option: $1" >&2
+                return 2
+                ;;
+        esac
+        shift
+    done
+
+    if [ "$non_interactive" = "true" ]; then
+        [ -n "$link" ] || { echo "Error: --non-interactive requires --link" >&2; return 2; }
+        if [ -n "$install_apk_url" ]; then
+            entitlement_require_feature installer Installer || return 1
+            installer_install_roblox "$install_apk_url" "com.roblox.client" "" false "$INSTALLER_MAX_APK_SIZE_MB" "$PROJECT_DIR" false false true false || return 1
+        fi
+        package="${package:-com.roblox.client}"
+        ui_setup_save "$config_file" "$link" "$package" "$webhook" "$anti_afk" || return 1
+        printf 'Config saved: %s\n' "$config_file"
+        return 0
+    fi
+
+    ui_setup_wizard "$PROJECT_DIR" "$config_file" "$link" "$package" "$webhook" "$anti_afk"
+}
+
+manager_profile() {
+    local subcommand="${1:-help}"
+    [ "$#" -gt 0 ] && shift
+    case "$subcommand" in
+        help|--help|-h) ;;
+        *) entitlement_require_feature profiles Profiles || return 1 ;;
+    esac
+
+    case "$subcommand" in
+        list)
+            profile_list "$PROJECT_DIR"
+            ;;
+        create)
+            local name=""
+            local link=""
+            local package="com.roblox.client"
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --name)
+                        shift
+                        [ "$#" -gt 0 ] || { echo "Error: --name requires a value" >&2; return 2; }
+                        name="$1"
+                        ;;
+                    --link)
+                        shift
+                        [ "$#" -gt 0 ] || { echo "Error: --link requires a value" >&2; return 2; }
+                        link="$1"
+                        ;;
+                    --package)
+                        shift
+                        [ "$#" -gt 0 ] || { echo "Error: --package requires a value" >&2; return 2; }
+                        package="$1"
+                        ;;
+                    *)
+                        echo "Error: unknown profile create option: $1" >&2
+                        return 2
+                        ;;
+                esac
+                shift
+            done
+            [ -n "$name" ] || { echo "Error: profile create requires --name" >&2; return 2; }
+            profile_create "$PROJECT_DIR" "$name" "$link" "$package" || return $?
+            printf 'Profile created: %s\n' "$name"
+            ;;
+        show)
+            local name="${1:-}"
+            [ -n "$name" ] || { echo "Error: profile show requires a name" >&2; return 2; }
+            profile_show "$PROJECT_DIR" "$name"
+            ;;
+        apply)
+            local name="${1:-}"
+            local target="${2:-}"
+            local package=""
+            [ -n "$name" ] || { echo "Error: profile apply requires a profile name" >&2; return 2; }
+            [ -n "$target" ] || { echo "Error: profile apply requires a target" >&2; return 2; }
+            shift 2
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --package)
+                        shift
+                        [ "$#" -gt 0 ] || { echo "Error: --package requires a value" >&2; return 2; }
+                        package="$1"
+                        ;;
+                    *)
+                        echo "Error: unknown profile apply option: $1" >&2
+                        return 2
+                        ;;
+                esac
+                shift
+            done
+            profile_apply "$PROJECT_DIR" "$name" "$target" "$package" || return $?
+            printf 'Profile applied: %s -> %s\n' "$name" "$target"
+            ;;
+        help|--help|-h)
+            cat <<'EOF'
+Usage:
+  roblox-manager profile list
+  roblox-manager profile create --name NAME --link URL_OR_PLACE_ID [--package PACKAGE]
+  roblox-manager profile show NAME
+  roblox-manager profile apply NAME TARGET [--package PACKAGE]
+EOF
+            ;;
+        *)
+            echo "Error: unknown profile command: $subcommand" >&2
+            return 2
+            ;;
+    esac
+}
+
+manager_install_roblox() {
+    local url=""
+    local expected_package=""
+    local expected_sha=""
+    local dry_run="false"
+    local max_mb="$INSTALLER_MAX_APK_SIZE_MB"
+    local allow_downgrade="false"
+    local keep_apk="false"
+    local yes="false"
+    local allow_custom_package="false"
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --expected-package)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --expected-package requires a value" >&2; return 2; }
+                expected_package="$1"
+                ;;
+            --sha256)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --sha256 requires a value" >&2; return 2; }
+                expected_sha="$1"
+                ;;
+            --dry-run)
+                dry_run="true"
+                ;;
+            --allow-downgrade)
+                allow_downgrade="true"
+                ;;
+            --allow-custom-package)
+                allow_custom_package="true"
+                ;;
+            --keep-apk)
+                keep_apk="true"
+                ;;
+            --yes|-y)
+                yes="true"
+                ;;
+            --max-size-mb)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --max-size-mb requires a value" >&2; return 2; }
+                max_mb="$1"
+                ;;
+            --help|-h)
+                cat <<'EOF'
+Usage:
+  roblox-manager install-roblox [--expected-package PACKAGE] [--sha256 HASH] [--max-size-mb MB] [--dry-run] [--yes] [--allow-downgrade] [--keep-apk] <HTTPS_APK_URL>
+EOF
+                return 0
+                ;;
+            -*)
+                echo "Error: unknown install-roblox option: $1" >&2
+                return 2
+                ;;
+            *)
+                if [ -n "$url" ]; then
+                    echo "Error: install-roblox accepts exactly one URL" >&2
+                    return 2
+                fi
+                url="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$url" ] || { echo "Error: missing HTTPS APK URL" >&2; return 2; }
+    entitlement_require_feature installer Installer || return 1
+    expected_package="${expected_package:-com.roblox.client}"
+    installer_install_roblox "$url" "$expected_package" "$expected_sha" "$dry_run" "$max_mb" "$PROJECT_DIR" "$allow_downgrade" "$keep_apk" "$yes" "$allow_custom_package"
+}
+
+manager_license() {
+    local subcommand="${1:-status}"
+    [ "$#" -gt 0 ] && shift
+
+    case "$subcommand" in
+        activate)
+            local key="${1:-}"
+            [ -n "$key" ] || { echo "Error: license activate requires a key" >&2; return 2; }
+            license_activate "$key" "$PROJECT_DIR"
+            ;;
+        validate)
+            license_validate "$PROJECT_DIR"
+            ;;
+        status)
+            license_status
+            ;;
+        deactivate)
+            local local_only="false"
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --local-only) local_only="true" ;;
+                    --help|-h)
+                        echo "Usage: roblox-manager license deactivate [--local-only]"
+                        return 0
+                        ;;
+                    *) echo "Error: unknown license deactivate option: $1" >&2; return 2 ;;
+                esac
+                shift
+            done
+            license_deactivate "$local_only"
+            ;;
+        help|--help|-h)
+            cat <<'EOF'
+Usage:
+  roblox-manager license status
+  roblox-manager license activate <KEY>
+  roblox-manager license validate
+  roblox-manager license deactivate [--local-only]
+EOF
+            ;;
+        *)
+            echo "Error: unknown license command: $subcommand" >&2
+            return 2
+            ;;
+    esac
+}
+
+manager_update() {
+    local subcommand="${1:-run}"
+    local yes="false"
+    [ "$#" -gt 0 ] && shift
+
+    case "$subcommand" in
+        --yes|-y)
+            yes="true"
+            subcommand="run"
+            ;;
+        run|install|"")
+            ;;
+        check|status|help|--help|-h)
+            ;;
+        *)
+            echo "Error: unknown update command: $subcommand" >&2
+            return 2
+            ;;
+    esac
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --yes|-y)
+                yes="true"
+                ;;
+            --help|-h)
+                subcommand="help"
+                ;;
+            *)
+                echo "Error: unknown update option: $1" >&2
+                return 2
+                ;;
+        esac
+        shift
+    done
+
+    case "$subcommand" in
+        check)
+            updater_check "$PROJECT_DIR"
+            local status=$?
+            updater_print_status
+            updater_cleanup
+            return "$status"
+            ;;
+        status)
+            updater_check "$PROJECT_DIR"
+            local status=$?
+            updater_print_status
+            updater_cleanup
+            return "$status"
+            ;;
+        run|install|"")
+            updater_update "$PROJECT_DIR" "$yes"
+            ;;
+        help|--help|-h)
+            cat <<'EOF'
+Usage:
+  roblox-manager update check
+  roblox-manager update status
+  roblox-manager update [--yes]
+EOF
+            ;;
+    esac
+}
+
+manager_self_test() {
+    if updater_self_test "$PROJECT_DIR"; then
+        printf 'Self-test passed.\n'
+    else
+        return 1
+    fi
+}
+
+manager_support_bundle() {
+    local output=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --output|-o)
+                shift
+                [ "$#" -gt 0 ] || { echo "Error: --output requires a file path" >&2; return 2; }
+                output="$1"
+                ;;
+            *)
+                echo "Error: unsupported option for support-bundle: $1" >&2
+                return 2
+                ;;
+        esac
+        shift
+    done
+
+    doctor_generate_support_bundle "$PROJECT_DIR" "$output"
+}
+
+manager_status() {
+    cd "$PROJECT_DIR" || return 2
+    bash "$PROJECT_DIR/auto_rejoin.sh"
+}
+
+manager_start() {
+    cd "$PROJECT_DIR" || return 2
+    AUTO_REJOIN_PARENT=true bash "$PROJECT_DIR/setup.sh" "$@"
+}
+
+command_name="${1:-help}"
+[ "$#" -gt 0 ] && shift
+
+case "$command_name" in
+    help|--help|-h)
+        manager_help
+        ;;
+    version|--version|-v)
+        manager_version
+        ;;
+    parse-link)
+        manager_parse_link "$@"
+        ;;
+    doctor)
+        manager_doctor "$@"
+        ;;
+    setup)
+        manager_setup "$@"
+        ;;
+    profile)
+        manager_profile "$@"
+        ;;
+    install-roblox)
+        manager_install_roblox "$@"
+        ;;
+    license)
+        manager_license "$@"
+        ;;
+    update)
+        manager_update "$@"
+        ;;
+    support-bundle)
+        manager_support_bundle "$@"
+        ;;
+    self-test)
+        manager_self_test "$@"
+        ;;
+    status)
+        manager_status "$@"
+        ;;
+    start)
+        manager_start "$@"
+        ;;
+    *)
+        echo "Error: unknown command: $command_name" >&2
+        echo "Run 'roblox-manager help' for usage." >&2
+        exit 2
+        ;;
+esac
