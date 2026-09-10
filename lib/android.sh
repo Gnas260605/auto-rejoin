@@ -213,12 +213,64 @@ android_start_uri() {
     android_start_uri_args "$@"
 }
 
+android_start_uri_fresh() {
+    local package="$1"
+    local uri="$2"
+    shift 2
+    local args=(start -S --activity-clear-task --activity-new-task)
+
+    if [ "$#" -eq 4 ]; then
+        android_validate_uint "$1" || return 2
+        android_validate_uint "$2" || return 2
+        android_validate_uint "$3" || return 2
+        android_validate_uint "$4" || return 2
+        args+=(--windowingMode 5 --launch-bounds "$1" "$2" "$3" "$4")
+    elif [ "$#" -ne 0 ]; then
+        return 2
+    fi
+
+    args+=(-a android.intent.action.VIEW -d "$uri")
+    if [ -n "$package" ]; then
+        android_validate_package "$package" || return 2
+        args+=(-p "$package")
+    fi
+
+    android_am "${args[@]}"
+}
+
 android_start_uri_for_user() {
     local user="$1"
     local package="$2"
     local uri="$3"
     shift 3
     local args=(start --user "$user")
+
+    android_validate_uint "$user" 9999 || return 2
+    if [ "$#" -eq 4 ]; then
+        android_validate_uint "$1" || return 2
+        android_validate_uint "$2" || return 2
+        android_validate_uint "$3" || return 2
+        android_validate_uint "$4" || return 2
+        args+=(--windowingMode 5 --launch-bounds "$1" "$2" "$3" "$4")
+    elif [ "$#" -ne 0 ]; then
+        return 2
+    fi
+
+    args+=(-a android.intent.action.VIEW -d "$uri")
+    if [ -n "$package" ]; then
+        android_validate_package "$package" || return 2
+        args+=(-p "$package")
+    fi
+
+    android_am "${args[@]}"
+}
+
+android_start_uri_for_user_fresh() {
+    local user="$1"
+    local package="$2"
+    local uri="$3"
+    shift 3
+    local args=(start --user "$user" -S --activity-clear-task --activity-new-task)
 
     android_validate_uint "$user" 9999 || return 2
     if [ "$#" -eq 4 ]; then

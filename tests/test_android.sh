@@ -118,6 +118,18 @@ direct_start_uri_keeps_ampersand_argument() {
     assert_eq "direct start uri argc" "am argc=7" "$(head -n 1 "$LOG_FILE")"
 }
 
+direct_start_uri_fresh_clears_old_task() {
+    local uri="roblox://experiences/start?placeId=107778070777162&gameInstanceId=abc1234567"
+    reset_log
+    ANDROID_EXECUTOR=direct android_start_uri_fresh "com.roblox.client" "$uri"
+    assert_status "direct fresh start uri status" 0 "$?"
+    assert_eq "direct fresh start argc" "am argc=10" "$(head -n 1 "$LOG_FILE")"
+    assert_eq "direct fresh start stop flag" "-S" "$(grep '^am arg2=' "$LOG_FILE" | cut -d= -f2-)"
+    assert_eq "direct fresh start clear task flag" "--activity-clear-task" "$(grep '^am arg3=' "$LOG_FILE" | cut -d= -f2-)"
+    assert_eq "direct fresh start new task flag" "--activity-new-task" "$(grep '^am arg4=' "$LOG_FILE" | cut -d= -f2-)"
+    assert_eq "direct fresh uri is one argument" "$uri" "$(grep '^am arg8=' "$LOG_FILE" | cut -d= -f2-)"
+}
+
 direct_input_tap() {
     reset_log
     ANDROID_EXECUTOR=direct android_input_tap 540 960
@@ -202,6 +214,7 @@ direct_install_downgrade_flag() {
 setup_fakes
 direct_force_stop
 direct_start_uri_keeps_ampersand_argument
+direct_start_uri_fresh_clears_old_task
 direct_input_tap
 adb_force_stop_preserves_args
 root_quotes_uri_with_ampersand

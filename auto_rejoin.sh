@@ -478,13 +478,13 @@ launch_roblox() {
     fi
 
     # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
-    ANDROID_EXECUTOR=direct android_start_uri "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+    ANDROID_EXECUTOR=direct android_start_uri_fresh "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
     local ret=$?
     [ $ret -eq 0 ] && launch_success=true
 
     # 2. Nếu thất bại, thử chạy qua run_cmd (su/adb) kèm theo --user 0
     if [ $ret -ne 0 ]; then
-        android_start_uri_for_user 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+        android_start_uri_for_user_fresh 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
         [ $ret -eq 0 ] && launch_success=true
     fi
