@@ -564,6 +564,15 @@ manager_status() {
 
 manager_start() {
     cd "$PROJECT_DIR" || return 2
+    local place_id="" private_code=""
+    if [ "$#" -eq 0 ] && [ -f "$PROJECT_DIR/config.env" ]; then
+        place_id="$(grep -E '^PLACE_ID=' "$PROJECT_DIR/config.env" 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d '"\r')"
+        private_code="$(grep -E '^PRIVATE_CODE=' "$PROJECT_DIR/config.env" 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d '"\r')"
+        if [ -n "$place_id" ]; then
+            AUTO_REJOIN_PARENT=true bash "$PROJECT_DIR/setup.sh" "$place_id" "$private_code"
+            return $?
+        fi
+    fi
     AUTO_REJOIN_PARENT=true bash "$PROJECT_DIR/setup.sh" "$@"
 }
 

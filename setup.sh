@@ -74,8 +74,17 @@ echo -e "${BGRN}╔════════════════════�
 echo -e "${BGRN}║      ROBLOX AUTO REJOIN - TRÌNH CÀI ĐẶT        ║${NC}"
 echo -e "${BGRN}╠══════════════════════════════════════════════════╣${NC}"
 
-PLACE_ID="${1:-97598239454123}"
+PLACE_ID="${1:-}"
 PRIVATE_CODE="${2:-}"
+
+if [ -z "$PLACE_ID" ] && [ -f "${SCRIPT_DIR}/config.env" ]; then
+    CFG_PLACE="$(grep -E '^PLACE_ID=' "${SCRIPT_DIR}/config.env" 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d '"\r')"
+    CFG_CODE="$(grep -E '^PRIVATE_CODE=' "${SCRIPT_DIR}/config.env" 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d '"\r')"
+    [ -n "$CFG_PLACE" ] && PLACE_ID="$CFG_PLACE"
+    [ -n "$CFG_CODE" ] && PRIVATE_CODE="$CFG_CODE"
+fi
+PLACE_ID="${PLACE_ID:-97598239454123}"
+PRIVATE_CODE="${PRIVATE_CODE:-}"
 
 printf "${BGRN}║${NC}  Place ID    : ${YLW}%-36s${NC}${BGRN}║${NC}\n" "$PLACE_ID"
 if [ -n "$PRIVATE_CODE" ]; then
@@ -94,7 +103,6 @@ echo -e "${BGRN}╚════════════════════�
 PKGS=("tmux" "curl" "tsu" "procps" "android-tools")
 MISSING_PKGS=()
 
-# Kiểm tra từng gói bằng dpkg -s (nhanh, không cần mạng)
 for p in "${PKGS[@]}"; do
     if dpkg -s "$p" > /dev/null 2>&1; then
         printf "  ${GRN}✓${NC} %-20s ${GRN}[Đã cài]${NC}\n" "$p"
@@ -110,7 +118,6 @@ if [ ${#MISSING_PKGS[@]} -eq 0 ]; then
 else
     echo -e "  ${YLW}Đang cập nhật danh sách repo...${NC}"
     pkg update -y -o Dpkg::Options::="--force-confold" 2>&1 | tail -3
-    echo ""
     mp_total=${#MISSING_PKGS[@]}
     mp_idx=0
     for p in "${MISSING_PKGS[@]}"; do
@@ -126,7 +133,6 @@ else
 fi
 echo ""
 
-# ── BƯỚC 2/4: Tải script mới nhất ─────────────────────────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║  [BƯỚC 2/4] Tải script auto_rejoin.sh           ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
