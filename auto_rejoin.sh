@@ -347,12 +347,30 @@ get_package_index() {
 launch_roblox() {
     local pkg="${ROBLOX_PACKAGE}"
     log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
-    local link
+    local link=""
     if [ -n "$PRIVATE_CODE" ]; then
         link="$(roblox_build_private_server_uri "$PRIVATE_CODE")" || {
             log_msg "${RED}[LAUNCH]${NC} Private server code không hợp lệ."
             return 1
         }
+    elif [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
+        local idx; idx=$(get_package_index "$pkg")
+        local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
+        local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
+        log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
+        local server_info
+        server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" 2>/dev/null || true)"
+        if [ -n "$server_info" ]; then
+            local chosen_job="${server_info%%|*}"
+            local rest="${server_info#*|}"
+            local chosen_playing="${rest%%|*}"
+            local chosen_max="${rest#*|}"
+            log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
+            link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")"
+        else
+            log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
+            link="$(roblox_build_game_uri "$PLACE_ID")"
+        fi
     else
         link="$(roblox_build_game_uri "$PLACE_ID")" || {
             log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."

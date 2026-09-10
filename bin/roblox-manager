@@ -188,6 +188,7 @@ manager_setup() {
     local package=""
     local webhook=""
     local anti_afk="true"
+    local join_low_server="false"
     local non_interactive="false"
     local install_apk_url=""
 
@@ -216,6 +217,15 @@ manager_setup() {
                 [ "$#" -gt 0 ] || { echo "Error: --anti-afk requires a value" >&2; return 2; }
                 anti_afk="$1"
                 ;;
+            --low-server|--smallest-server)
+                shift
+                if [ "$#" -gt 0 ] && case "$1" in true|false) true ;; *) false ;; esac; then
+                    join_low_server="$1"
+                else
+                    join_low_server="true"
+                    continue
+                fi
+                ;;
             --install-apk-url)
                 shift
                 [ "$#" -gt 0 ] || { echo "Error: --install-apk-url requires a value" >&2; return 2; }
@@ -230,7 +240,7 @@ manager_setup() {
                 cat <<'EOF'
 Usage:
   roblox-manager setup
-  roblox-manager setup --non-interactive --link URL_OR_PLACE_ID [--package PACKAGE] [--config-file FILE]
+  roblox-manager setup --non-interactive --link URL_OR_PLACE_ID [--package PACKAGE] [--low-server true|false] [--config-file FILE]
 EOF
                 return 0
                 ;;
@@ -249,12 +259,12 @@ EOF
             installer_install_roblox "$install_apk_url" "com.roblox.client" "" false "$INSTALLER_MAX_APK_SIZE_MB" "$PROJECT_DIR" false false true false || return 1
         fi
         package="${package:-com.roblox.client}"
-        ui_setup_save "$config_file" "$link" "$package" "$webhook" "$anti_afk" || return 1
+        ui_setup_save "$config_file" "$link" "$package" "$webhook" "$anti_afk" "$join_low_server" || return 1
         printf 'Config saved: %s\n' "$config_file"
         return 0
     fi
 
-    ui_setup_wizard "$PROJECT_DIR" "$config_file" "$link" "$package" "$webhook" "$anti_afk"
+    ui_setup_wizard "$PROJECT_DIR" "$config_file" "$link" "$package" "$webhook" "$anti_afk" "$join_low_server"
 }
 
 manager_profile() {

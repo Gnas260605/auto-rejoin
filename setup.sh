@@ -100,7 +100,7 @@ echo -e "${BGRN}╔════════════════════�
 echo -e "${BGRN}║  [BƯỚC 1/4] Kiểm tra & Cài đặt gói cần thiết   ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 
-PKGS=("tmux" "curl" "tsu" "procps" "android-tools")
+PKGS=("tmux" "curl" "jq" "tsu" "procps" "android-tools")
 MISSING_PKGS=()
 
 for p in "${PKGS[@]}"; do
@@ -329,6 +329,9 @@ if [ -f "config.cfg" ]; then
     DEFAULT_FREEFORM_HEIGHT=$(grep '^FREEFORM_HEIGHT=' config.cfg | cut -d'=' -f2 2>/dev/null)
     DEFAULT_FREEFORM_OFFSET_X=$(grep '^FREEFORM_OFFSET_X=' config.cfg | cut -d'=' -f2 2>/dev/null)
     DEFAULT_FREEFORM_OFFSET_Y=$(grep '^FREEFORM_OFFSET_Y=' config.cfg | cut -d'=' -f2 2>/dev/null)
+    DEFAULT_LOW_SERVER=$(grep '^JOIN_LOW_SERVER=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+    DEFAULT_LOW_MIN=$(grep '^LOW_SERVER_MIN_PLAYERS=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+    DEFAULT_LOW_MAX=$(grep '^LOW_SERVER_MAX_PLAYERS=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
 fi
 
 echo -e "${BGRN}+------------------------------------------------------+${NC}"
@@ -354,6 +357,9 @@ for PKG in $PACKAGES; do
     EXISTING_FREEFORM_HEIGHT=""
     EXISTING_FREEFORM_OFFSET_X=""
     EXISTING_FREEFORM_OFFSET_Y=""
+    EXISTING_LOW_SERVER=""
+    EXISTING_LOW_MIN=""
+    EXISTING_LOW_MAX=""
 
     if [ -f "$CFG" ]; then
         EXISTING_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' "$CFG" | cut -d'"' -f2 2>/dev/null)
@@ -368,6 +374,9 @@ for PKG in $PACKAGES; do
         EXISTING_FREEFORM_HEIGHT=$(grep '^FREEFORM_HEIGHT=' "$CFG" | cut -d'=' -f2 2>/dev/null)
         EXISTING_FREEFORM_OFFSET_X=$(grep '^FREEFORM_OFFSET_X=' "$CFG" | cut -d'=' -f2 2>/dev/null)
         EXISTING_FREEFORM_OFFSET_Y=$(grep '^FREEFORM_OFFSET_Y=' "$CFG" | cut -d'=' -f2 2>/dev/null)
+        EXISTING_LOW_SERVER=$(grep '^JOIN_LOW_SERVER=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+        EXISTING_LOW_MIN=$(grep '^LOW_SERVER_MIN_PLAYERS=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+        EXISTING_LOW_MAX=$(grep '^LOW_SERVER_MAX_PLAYERS=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     fi
 
     # Lấy giá trị hiện tại (ưu tiên của account -> mặc định chung -> mặc định mặc định)
@@ -383,6 +392,9 @@ for PKG in $PACKAGES; do
     FREEFORM_HEIGHT="${EXISTING_FREEFORM_HEIGHT:-${DEFAULT_FREEFORM_HEIGHT:-960}}"
     FREEFORM_OFFSET_X="${EXISTING_FREEFORM_OFFSET_X:-${DEFAULT_FREEFORM_OFFSET_X:-60}}"
     FREEFORM_OFFSET_Y="${EXISTING_FREEFORM_OFFSET_Y:-${DEFAULT_FREEFORM_OFFSET_Y:-80}}"
+    JOIN_LOW_SERVER="${EXISTING_LOW_SERVER:-${DEFAULT_LOW_SERVER:-false}}"
+    LOW_SERVER_MIN_PLAYERS="${EXISTING_LOW_MIN:-${DEFAULT_LOW_MIN:-1}}"
+    LOW_SERVER_MAX_PLAYERS="${EXISTING_LOW_MAX:-${DEFAULT_LOW_MAX:-0}}"
 
     cat > "$CFG" <<EOF
 PLACE_ID="$PLACE_ID"
@@ -401,6 +413,9 @@ FREEFORM_WIDTH=$FREEFORM_WIDTH
 FREEFORM_HEIGHT=$FREEFORM_HEIGHT
 FREEFORM_OFFSET_X=$FREEFORM_OFFSET_X
 FREEFORM_OFFSET_Y=$FREEFORM_OFFSET_Y
+JOIN_LOW_SERVER=$JOIN_LOW_SERVER
+LOW_SERVER_MIN_PLAYERS=$LOW_SERVER_MIN_PLAYERS
+LOW_SERVER_MAX_PLAYERS=$LOW_SERVER_MAX_PLAYERS
 EOF
 
     progress_bar $COUNT $TOTAL "Khởi động acc $COUNT/$TOTAL..."

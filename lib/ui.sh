@@ -42,6 +42,7 @@ ui_setup_save() {
     local package="$3"
     local webhook="$4"
     local anti_afk="$5"
+    local join_low_server="${6:-false}"
 
     config_init_defaults
     ui_apply_link_to_config_values "$link" || return 1
@@ -51,6 +52,7 @@ ui_setup_save() {
     fi
     DISCORD_WEBHOOK="$webhook"
     ANTI_AFK="$anti_afk"
+    JOIN_LOW_SERVER="$join_low_server"
 
     if [ -f "$config_file" ]; then
         config_backup "$config_file" || return 1
@@ -82,6 +84,7 @@ ui_setup_wizard() {
     local package="${4:-}"
     local webhook="${5:-}"
     local anti_afk="${6:-true}"
+    local join_low_server="${7:-false}"
     local packages first_package
 
     if [ -z "$link" ]; then
@@ -106,7 +109,8 @@ ui_setup_wizard() {
         webhook="$(ui_prompt 'Discord webhook (optional)' '')"
     fi
     anti_afk="$(ui_prompt 'Enable anti-AFK? true/false' "$anti_afk")"
+    join_low_server="$(ui_prompt 'Auto join low-player server? true/false' "$join_low_server")"
 
-    ui_setup_save "$config_file" "$link" "$package" "$webhook" "$anti_afk" || return 1
+    ui_setup_save "$config_file" "$link" "$package" "$webhook" "$anti_afk" "$join_low_server" || return 1
     printf 'Config saved: %s\n' "$config_file"
 }

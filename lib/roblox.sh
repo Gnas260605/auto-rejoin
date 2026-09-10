@@ -103,10 +103,131 @@ roblox_query_param() {
     return 1
 }
 
+roblox_validate_job_id() {
+    local job_id="$1"
+    [[ "$job_id" =~ ^[A-Za-z0-9_-]{10,64}$ ]]
+}
+
 roblox_build_game_uri() {
     local place_id="$1"
+    local job_id="${2:-}"
     roblox_validate_place_id "$place_id" || return 1
-    printf 'roblox://experiences/start?placeId=%s\n' "$place_id"
+    if [ -n "$job_id" ]; then
+        roblox_validate_job_id "$job_id" || return 1
+        printf 'roblox://experiences/start?placeId=%s&gameInstanceId=%s\n' "$place_id" "$job_id"
+    else
+        printf 'roblox://experiences/start?placeId=%s\n' "$place_id"
+    fi
+}
+
+roblox_fetch_public_servers() {
+    local place_id="$1"
+    local limit="${2:-100}"
+    roblox_validate_place_id "$place_id" || return 1
+    local url="https://games.roblox.com/v1/games/${place_id}/servers/Public?sortOrder=Asc&limit=${limit}&excludeFullGames=true"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sSL --connect-timeout 6 --max-time 12 "$url" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+roblox_pick_low_server() {
+    local place_id="$1"
+    local slot_index="${2:-0}"
+    local min_players="${3:-1}"
+    local max_players="${4:-0}"
+
+    local json_out
+    json_out="$(roblox_fetch_public_servers "$place_id" 100)" || return 1
+    [ -n "$json_out" ] || return 1
+
+    local servers=""
+    if command -v jq >/dev/null 2>&1; then
+        servers="$(printf '%s' "$json_out" | jq -r \
+            --argjson min "$min_players" \
+            --argjson max "$max_players" '
+            [ (.data // [])[]
+              | select(.id != null and .playing != null and .maxPlayers != null)
+              | select(.playing < .maxPlayers)
+              | select($min <= 0 or .playing >= $min)
+              | select($max <= 0 or .playing <= $max)
+            ]
+            | sort_by([.playing, (.ping // 999)])
+            | .[]
+            | [ .id, (.playing | tostring), (.maxPlayers | tostring) ]
+            | join("|")
+        ' 2>/dev/null || true)"
+    elif python3 -c "import sys" >/dev/null 2>&1 || python -c "import sys" >/dev/null 2>&1; then
+        local py_bin="python3"
+        python3 -c "import sys" >/dev/null 2>&1 || py_bin="python"
+        servers="$(printf '%s' "$json_out" | "$py_bin" -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    items = data.get("data", [])
+    min_p = int(sys.argv[1])
+    max_p = int(sys.argv[2])
+    valid = []
+    for it in items:
+        jid = it.get("id")
+        pl = it.get("playing")
+        mx = it.get("maxPlayers")
+        png = it.get("ping", 999) or 999
+        if not jid or pl is None or mx is None:
+            continue
+        if pl >= mx:
+            continue
+        if min_p > 0 and pl < min_p:
+            continue
+        if max_p > 0 and pl > max_p:
+            continue
+        valid.append((pl, png, str(jid), mx))
+    valid.sort(key=lambda x: (x[0], x[1]))
+    for pl, png, jid, mx in valid:
+        print(f"{jid}|{pl}|{mx}")
+except Exception:
+    pass
+' "$min_players" "$max_players" 2>/dev/null || true)"
+    elif command -v node >/dev/null 2>&1; then
+        servers="$(printf '%s' "$json_out" | node -e '
+let input = "";
+process.stdin.on("data", c => input += c);
+process.stdin.on("end", () => {
+    try {
+        const data = JSON.parse(input);
+        const minP = parseInt(process.argv[1] || "1", 10);
+        const maxP = parseInt(process.argv[2] || "0", 10);
+        const items = (data.data || []).filter(s => {
+            if (!s.id || s.playing === undefined || s.maxPlayers === undefined) return false;
+            if (s.playing >= s.maxPlayers) return false;
+            if (minP > 0 && s.playing < minP) return false;
+            if (maxP > 0 && s.playing > maxP) return false;
+            return true;
+        });
+        items.sort((a, b) => (a.playing - b.playing) || ((a.ping || 999) - (b.ping || 999)));
+        for (const it of items) {
+            console.log(`${it.id}|${it.playing}|${it.maxPlayers}`);
+        }
+    } catch (e) {}
+});
+' "$min_players" "$max_players" 2>/dev/null || true)"
+    else
+        return 1
+    fi
+
+    [ -n "$servers" ] || return 1
+
+    local count
+    count=$(printf '%s\n' "$servers" | sed '/^$/d' | wc -l | tr -d ' ')
+    [ "$count" -gt 0 ] || return 1
+
+    local target_line=$(( (slot_index % count) + 1 ))
+    local selected
+    selected="$(printf '%s\n' "$servers" | sed -n "${target_line}p")"
+    [ -n "$selected" ] || return 1
+
+    printf '%s\n' "$selected"
 }
 
 roblox_build_private_server_uri() {
@@ -183,10 +304,15 @@ roblox_parse_uri() {
         experiences/start)
             place_id="$(roblox_query_param "$query" "placeId")" || return 1
             roblox_validate_place_id "$place_id" || return 1
+            local job_id
+            job_id="$(roblox_query_param "$query" "gameInstanceId" 2>/dev/null || true)"
+            if [ -n "$job_id" ] && ! roblox_validate_job_id "$job_id"; then
+                job_id=""
+            fi
             ROBLOX_LINK_TYPE="game"
             ROBLOX_PARSED_PLACE_ID="$place_id"
             ROBLOX_PARSED_PRIVATE_CODE=""
-            ROBLOX_PARSED_URI="$(roblox_build_game_uri "$place_id")"
+            ROBLOX_PARSED_URI="$(roblox_build_game_uri "$place_id" "$job_id")"
             ;;
         navigation/share_links)
             code="$(roblox_query_param "$query" "code")" || return 1

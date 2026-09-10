@@ -34,11 +34,14 @@ config_init_defaults() {
     FREEFORM_OFFSET_X="${FREEFORM_OFFSET_X:-auto}"
     FREEFORM_OFFSET_Y="${FREEFORM_OFFSET_Y:-auto}"
     LICENSE_MODE="${AUTO_REJOIN_LICENSE_MODE:-${LICENSE_MODE:-optional}}"
+    JOIN_LOW_SERVER="${JOIN_LOW_SERVER:-false}"
+    LOW_SERVER_MIN_PLAYERS="${LOW_SERVER_MIN_PLAYERS:-1}"
+    LOW_SERVER_MAX_PLAYERS="${LOW_SERVER_MAX_PLAYERS:-0}"
 }
 
 config_is_allowed_key() {
     case "$1" in
-        PLACE_ID|PRIVATE_CODE|ROBLOX_PACKAGE|CHECK_INTERVAL|AUTO_RESTART_PERIOD|ANTI_AFK|AFK_TAP_INTERVAL|TAP_X|TAP_Y|DISCORD_WEBHOOK|ROBLOX_USERNAME|PROFILE|FREEFORM_LAYOUT|FREEFORM_WIDTH|FREEFORM_HEIGHT|FREEFORM_OFFSET_X|FREEFORM_OFFSET_Y|LICENSE_MODE)
+        PLACE_ID|PRIVATE_CODE|ROBLOX_PACKAGE|CHECK_INTERVAL|AUTO_RESTART_PERIOD|ANTI_AFK|AFK_TAP_INTERVAL|TAP_X|TAP_Y|DISCORD_WEBHOOK|ROBLOX_USERNAME|PROFILE|FREEFORM_LAYOUT|FREEFORM_WIDTH|FREEFORM_HEIGHT|FREEFORM_OFFSET_X|FREEFORM_OFFSET_Y|LICENSE_MODE|JOIN_LOW_SERVER|LOW_SERVER_MIN_PLAYERS|LOW_SERVER_MAX_PLAYERS)
             return 0
             ;;
         *)
@@ -214,6 +217,9 @@ config_validate() {
     config_validate_auto_or_uint FREEFORM_OFFSET_X auto 0 100000 || status=1
     config_validate_auto_or_uint FREEFORM_OFFSET_Y auto 0 100000 || status=1
     config_validate_license_mode || status=1
+    config_normalize_bool JOIN_LOW_SERVER || { JOIN_LOW_SERVER="false"; status=1; }
+    config_validate_uint LOW_SERVER_MIN_PLAYERS 1 0 1000 || status=1
+    config_validate_uint LOW_SERVER_MAX_PLAYERS 0 0 1000 || status=1
 
     return "$status"
 }
@@ -295,6 +301,9 @@ config_save() {
         config_write_raw FREEFORM_OFFSET_X
         config_write_raw FREEFORM_OFFSET_Y
         config_write_raw LICENSE_MODE
+        config_write_raw JOIN_LOW_SERVER
+        config_write_raw LOW_SERVER_MIN_PLAYERS
+        config_write_raw LOW_SERVER_MAX_PLAYERS
     } > "$tmp" || {
         rm -f "$tmp"
         return 1
