@@ -663,7 +663,7 @@ check_roblox_log_for_disconnect() {
 
     # Sử dụng grep -E -i (Extended Regex) tương thích tuyệt đối với Toybox/Busybox của Android
     # Bổ sung các từ khóa quét lỗi kick và lỗi dữ liệu lưu trữ
-    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|disconnected|kick|kicked|moderation message|error code[:= ]*267|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account|save data|save data did.?n.?t load|didn.?t load right|data did.?n.?t load|please rejoin|closed connection|connection closed|failed to connect"; then
+    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|disconnected|server has shut down|server shutdown|shut down|shutdown|kick|kicked|moderation message|error code[:= ]*267|error code[:= ]*288|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account|save data|save data did.?n.?t load|didn.?t load right|data did.?n.?t load|please rejoin|closed connection|connection closed|failed to connect"; then
         return 0
     fi
 
