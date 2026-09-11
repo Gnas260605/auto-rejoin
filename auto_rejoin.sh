@@ -305,6 +305,18 @@ scan_all_usernames() {
 
 
 
+# ══════════════════════════════════════════════════════════
+#  Lấy danh sách tất cả file config
+# ══════════════════════════════════════════════════════════
+get_all_configs() {
+    local cfgs
+    cfgs=$(ls config_*.cfg 2>/dev/null | grep -v '^config.cfg$' | sort)
+    if [ -z "$cfgs" ] && [ -f "config.cfg" ]; then
+        cfgs="config.cfg"
+    fi
+    echo "$cfgs"
+}
+
 # ── Mở Roblox vào game ───────────────────────────────────
 get_package_index() {
     local target_pkg="$1"
@@ -314,7 +326,7 @@ get_package_index() {
     if [ -n "$cfgs" ]; then
         for cfg in $cfgs; do
             if [ -f "$cfg" ]; then
-                local p; p=$(grep '^ROBLOX_PACKAGE=' "$cfg" 2>/dev/null | cut -d'"' -f2)
+                local p; p=$(grep '^ROBLOX_PACKAGE=' "$cfg" 2>/dev/null | cut -d'=' -f2 | tr -d '"\r')
                 [ -n "$p" ] && all_pkgs="$all_pkgs $p"
             fi
         done
@@ -326,12 +338,10 @@ get_package_index() {
     # Nếu vẫn trống (ví dụ chưa chạy setup), quét hệ thống qua Executor (su/adb)
     if [ -z "$all_pkgs" ]; then
         init_executor
-        all_pkgs=$(android_list_packages 2>/dev/null | grep -iE "roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx" | cut -d: -f2 | tr -d '\r' | sort -u)
+        all_pkgs=$(android_list_packages -3 2>/dev/null | grep -iE "roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx" | cut -d: -f2 | tr -d '\r' | sort -u)
+        [ -z "$all_pkgs" ] && all_pkgs=$(android_list_packages 2>/dev/null | grep -iE "roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx" | cut -d: -f2 | tr -d '\r' | sort -u)
     fi
-    if [ -z "$all_pkgs" ]; then
-        all_pkgs=$(ANDROID_EXECUTOR=direct android_list_packages 2>/dev/null | grep -iE "roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx" | cut -d: -f2 | tr -d '\r' | sort -u)
-    fi
-    [ -z "$all_pkgs" ] && all_pkgs="com.roblox.client"
+    [ -z "$all_pkgs" ] && all_pkgs="$target_pkg"
 
     local idx=0
     for p in $all_pkgs; do
@@ -777,15 +787,6 @@ progress_bar() {
 
 # ══════════════════════════════════════════════════════════
 #  MENU: Lấy danh sách config của các acc
-# ══════════════════════════════════════════════════════════
-get_all_configs() {
-    local cfgs
-    cfgs=$(ls config_com*.cfg 2>/dev/null | sort)
-    if [ -z "$cfgs" ] && [ -f "config.cfg" ]; then
-        cfgs="config.cfg"
-    fi
-    echo "$cfgs"
-}
 
 # =====================================================
 #  MENU: Bang trang thai tong quan
