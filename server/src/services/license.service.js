@@ -3,6 +3,7 @@ import {
   LICENSE_ERROR_CODES,
   LICENSE_KEY_PATTERN,
   LICENSE_STATUSES,
+  DEFAULT_PRICING_PLANS,
   PLAN_ENTITLEMENTS
 } from "../constants/license.js";
 import { errorResponse, successResponse } from "../utils/response.js";
@@ -11,8 +12,11 @@ import {
   generateOpaqueToken,
   hashLicenseKey,
   hashToken,
-  normalizeLicenseKey
+  normalizeLicenseKey,
+  generateLicenseKey,
+  displayPartsForKey
 } from "../utils/token.js";
+import { sendDiscordWebhook, sendTelegramNotification } from "../utils/notification.js";
 
 export class LicenseError extends Error {
   constructor(code, message, httpStatus = 400) {
@@ -261,5 +265,186 @@ export class LicenseService {
       deactivated: true,
       serverTime: successResponse().serverTime
     };
+  }
+
+  async lookupLicense(rawKey) {
+    if (!rawKey || typeof rawKey !== "string") {
+      throw new LicenseError(LICENSE_ERROR_CODES.INVALID_REQUEST, "License key is required", 400);
+    }
+    const normalizedKey = this.normalizeAndValidateKey(rawKey);
+    const keyHash = this.tokenUtils.hashLicenseKey(normalizedKey, this.config.license.keyPepper);
+    const license = await this.repository.findLicenseByKeyHash(keyHash);
+    if (!license) {
+      throw new LicenseError(LICENSE_ERROR_CODES.INVALID_KEY, "License key not found", 404);
+    }
+
+    const devices = await this.repository.listActiveDevicesForLicense(license.id);
+    const entitlements = this.entitlementsForPlan(license.plan);
+    const isLicenseExpired = license.expires_at ? isExpired(license.expires_at) : false;
+
+    let computedStatus = license.status;
+    if (license.status === "active" && isLicenseExpired) {
+      computedStatus = "expired";
+    }
+
+    return {
+      prefix: license.license_key_prefix,
+      last4: license.license_key_last4,
+      plan: license.plan,
+      status: computedStatus,
+      maxDevices: license.max_devices,
+      activeDevicesCount: devices.length,
+      expiresAt: license.expires_at ? new Date(license.expires_at).toISOString() : null,
+      isExpired: isLicenseExpired,
+      features: entitlements.features || [],
+      maxInstances: entitlements.maxInstances || 1,
+      devices: devices.map((d) => ({
+        id: d.id,
+        installationIdMasked: d.installation_id ? `${d.installation_id.slice(0, 4)}****${d.installation_id.slice(-4)}` : "Unknown",
+        deviceName: d.device_name || "Unknown Device",
+        platform: d.platform || "Android",
+        lastSeenAt: d.last_seen_at ? new Date(d.last_seen_at).toISOString() : null,
+        firstActivatedAt: d.first_activated_at ? new Date(d.first_activated_at).toISOString() : null
+      }))
+    };
+  }
+
+  async customerResetDevice(rawKey, deviceId) {
+    if (!rawKey || !deviceId) {
+      throw new LicenseError(LICENSE_ERROR_CODES.INVALID_REQUEST, "License key and deviceId are required", 400);
+    }
+    const normalizedKey = this.normalizeAndValidateKey(rawKey);
+    const keyHash = this.tokenUtils.hashLicenseKey(normalizedKey, this.config.license.keyPepper);
+    const license = await this.repository.findLicenseByKeyHash(keyHash);
+    if (!license) {
+      throw new LicenseError(LICENSE_ERROR_CODES.INVALID_KEY, "License key not found", 404);
+    }
+
+    const devices = await this.repository.listActiveDevicesForLicense(license.id);
+    const target = devices.find((d) => d.id === Number(deviceId));
+    if (!target) {
+      throw new LicenseError(LICENSE_ERROR_CODES.INVALID_REQUEST, "Active device not found under this license", 404);
+    }
+
+    await this.repository.revokeDeviceAndTokens(target.id);
+    await this.repository.insertEvent({
+      licenseId: license.id,
+      deviceId: target.id,
+      eventType: "customer_device_reset",
+      metadata: { deviceName: target.device_name }
+    });
+
+    return { success: true, message: "Device successfully unlinked" };
+  }
+
+  async createCustomerOrder(data) {
+    const { plan = "month", price, orderCode, discordWebhook, telegramBotToken, telegramChatId } = data || {};
+
+    // Look up dynamic plan configuration from database
+    let matchedPlan = null;
+    try {
+      const dbPlans = await this.repository.getSystemSetting("pricing_plans");
+      if (Array.isArray(dbPlans)) {
+        matchedPlan = dbPlans.find((p) => p.id === plan) || null;
+      }
+    } catch (_e) {
+      matchedPlan = null;
+    }
+
+    let expiresInDays = 30;
+    if (matchedPlan) {
+      const dur = String(matchedPlan.duration || "").toLowerCase();
+      if (matchedPlan.id === "day" || dur.includes("24") || dur.includes("1 ngày")) {
+        expiresInDays = 1;
+      } else if (matchedPlan.id === "week" || dur.includes("7")) {
+        expiresInDays = 7;
+      } else if (matchedPlan.id === "month" || dur.includes("30")) {
+        expiresInDays = 30;
+      } else if (matchedPlan.id === "lifetime" || dur.includes("vĩnh viễn") || dur.includes("trọn đời")) {
+        expiresInDays = null;
+      } else {
+        const num = dur.match(/\d+/);
+        expiresInDays = num ? Number(num[0]) : 30;
+      }
+    } else {
+      if (plan === "day") expiresInDays = 1;
+      if (plan === "week") expiresInDays = 7;
+      if (plan === "month") expiresInDays = 30;
+      if (plan === "lifetime") expiresInDays = null;
+    }
+
+    const maxDevices = matchedPlan?.maxDevices ? Number(matchedPlan.maxDevices) : (plan === "lifetime" ? 4 : plan === "month" ? 2 : 1);
+    const planName = matchedPlan?.plan || (plan === "lifetime" ? "business" : plan === "basic" ? "basic" : "pro");
+    const finalPrice = price !== undefined && price !== null ? price : (matchedPlan?.priceNumber || 100000);
+    const planDisplayName = matchedPlan?.name || plan.toUpperCase();
+
+    const rawKey = generateLicenseKey();
+    const normalizedKey = rawKey.toUpperCase();
+    const display = displayPartsForKey(normalizedKey);
+    const keyHash = hashLicenseKey(normalizedKey, this.config.license.keyPepper);
+
+    const expiresAt = expiresInDays ? secondsFromNow(expiresInDays * 86400) : null;
+
+    let licenseId = 0;
+    try {
+      licenseId = await this.repository.createLicense({
+        keyHash,
+        keyPrefix: display.prefix,
+        keyLast4: display.last4,
+        plan: planName,
+        maxDevices,
+        expiresAt
+      });
+    } catch (_e) {
+      // if DB fails, continue with generated key
+    }
+
+    const notificationText = `🛒 <b>ĐƠN HÀNG MỚI - AUTO REJOIN PRO</b>\n` +
+      `• Mã đơn: <code>${orderCode}</code>\n` +
+      `• Gói mua: <b>${planDisplayName}</b> (${expiresInDays ? `${expiresInDays} ngày` : 'Vĩnh viễn'} - ${maxDevices} máy)\n` +
+      `• Số tiền: <b>${Number(finalPrice).toLocaleString('vi-VN')} đ</b>\n` +
+      `• License Key: <code>${rawKey}</code>\n` +
+      `• Thời gian: ${new Date().toLocaleString('vi-VN')}`;
+
+    if (telegramBotToken && telegramChatId) {
+      sendTelegramNotification(telegramBotToken, telegramChatId, notificationText).catch(() => {});
+    }
+
+    if (discordWebhook) {
+      sendDiscordWebhook(discordWebhook, {
+        embeds: [{
+          title: "🛒 ĐƠN HÀNG MỚI - AUTO REJOIN PRO",
+          color: 0x10b981,
+          fields: [
+            { name: "Mã Đơn Hàng", value: orderCode || "N/A", inline: true },
+            { name: "Gói Mua", value: plan.toUpperCase(), inline: true },
+            { name: "Số Tiền", value: `${Number(price).toLocaleString('vi-VN')} đ`, inline: true },
+            { name: "License Key Cấp Cho Khách", value: `\`${rawKey}\``, inline: false },
+            { name: "Thời Hạn", value: expiresInDays ? `${expiresInDays} Ngày` : "Vĩnh Viễn", inline: true }
+          ],
+          footer: { text: "Hệ thống bán key tự động Auto Rejoin Pro" },
+          timestamp: new Date().toISOString()
+        }]
+      }).catch(() => {});
+    }
+
+    return {
+      success: true,
+      orderCode,
+      licenseKey: rawKey,
+      plan: planName,
+      maxDevices,
+      expiresAt: expiresAt ? expiresAt.toISOString() : null
+    };
+  }
+
+  async getPublicPricing() {
+    const plans = await this.repository.getSystemSetting("pricing_plans");
+    if (!plans || !Array.isArray(plans)) {
+      return DEFAULT_PRICING_PLANS
+        .filter((p) => p.enabled !== false)
+        .map((plan) => ({ ...plan, features: [...plan.features] }));
+    }
+    return plans.filter((p) => p.enabled !== false);
   }
 }

@@ -58,7 +58,7 @@ class MockLicenseRepository {
 test("admin password hash and verify utils", async () => {
   await assert.rejects(
     async () => hashPassword("short"),
-    /Password must be at least 12 characters/
+    /Password must be at least 6 characters/
   );
 
   const hash = await hashPassword("my_super_secret_password_123");

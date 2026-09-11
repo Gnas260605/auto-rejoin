@@ -23,13 +23,19 @@ export function CreateLicenseModal({ isOpen, onClose, onCreated, plans = [] }) {
 
     try {
       let expiresInDays = null;
+      let expiresInHours = null;
       if (expiryOption !== "lifetime") {
-        expiresInDays = expiryOption === "custom" ? Number(customDays) : Number(expiryOption);
+        if (expiryOption === "trial_4h") {
+          expiresInHours = 4;
+        } else {
+          expiresInDays = expiryOption === "custom" ? Number(customDays) : Number(expiryOption);
+        }
       }
 
       const res = await api.createLicense({
         plan,
         maxDevices: Number(maxDevices),
+        expiresInHours,
         expiresInDays
       });
 
@@ -135,6 +141,7 @@ export function CreateLicenseModal({ isOpen, onClose, onCreated, plans = [] }) {
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">License Expiration</label>
                 <div className="grid grid-cols-3 gap-2.5">
                   {[
+                    { id: "trial_4h", label: "4 Hours" },
                     { id: "30", label: "30 Days" },
                     { id: "90", label: "90 Days" },
                     { id: "365", label: "1 Year" },

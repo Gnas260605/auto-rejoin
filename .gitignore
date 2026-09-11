@@ -12,3 +12,4 @@ tmp/*
 keys/private/
 release/private/
 release/
+.agents/

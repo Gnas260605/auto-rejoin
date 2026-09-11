@@ -150,12 +150,32 @@ export class LicenseRepository {
     );
   }
 
+  async findLicenseByKeyHash(keyHash) {
+    const [rows] = await this.pool.execute(
+      "SELECT * FROM licenses WHERE license_key_hash = ?",
+      [keyHash]
+    );
+    return rows[0] || null;
+  }
+
+  async listActiveDevicesForLicense(licenseId) {
+    const [rows] = await this.pool.execute(
+      `SELECT id, installation_id, device_name, platform, executor, client_version, first_activated_at, last_seen_at
+       FROM license_devices
+       WHERE license_id = ? AND revoked_at IS NULL
+       ORDER BY last_seen_at DESC`,
+      [licenseId]
+    );
+    return rows;
+  }
+
   async createLicense(fields) {
     const now = mysqlDate(nowDate());
     const [result] = await this.pool.execute(
       `INSERT INTO licenses
-        (license_key_hash, license_key_prefix, license_key_last4, plan, status, max_devices, expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+        (license_key_hash, license_key_prefix, license_key_last4, plan, status, max_devices, expires_at,
+         customer_name, customer_contact, sales_channel, customer_note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         fields.keyHash,
         fields.keyPrefix,
@@ -163,10 +183,25 @@ export class LicenseRepository {
         fields.plan,
         fields.maxDevices,
         fields.expiresAt ? mysqlDate(fields.expiresAt) : null,
+        fields.customerName || null,
+        fields.customerContact || null,
+        fields.salesChannel || "direct",
+        fields.customerNote || null,
         now,
         now
       ]
     );
     return result.insertId;
   }
+
+  async getSystemSetting(key) {
+    const [rows] = await this.pool.execute(
+      "SELECT setting_value FROM system_settings WHERE setting_key = ?",
+      [key]
+    );
+    if (!rows || rows.length === 0) return null;
+    const val = rows[0].setting_value;
+    return typeof val === "string" ? JSON.parse(val) : val;
+  }
 }
+

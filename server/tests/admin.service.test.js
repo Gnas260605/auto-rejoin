@@ -234,6 +234,24 @@ test("AdminService: createLicense returns raw key once and persists hash", async
   assert.equal(adminRepo.audits[0].action, "license_created");
 });
 
+test("AdminService: createLicense supports 4 hour trial keys", async () => {
+  const adminRepo = new MemoryAdminRepository();
+  const licenseRepo = new MemoryLicenseRepository(adminRepo);
+  const service = new AdminService({ adminRepository: adminRepo, licenseRepository: licenseRepo, config });
+
+  const before = Date.now();
+  const result = await service.createLicense(
+    { plan: "basic", maxDevices: 1, expiresInHours: 4 },
+    { adminId: 1, ip: "127.0.0.1" }
+  );
+  const after = Date.now();
+  const expiryMs = new Date(result.license.expiresAt).getTime();
+
+  assert.ok(expiryMs >= before + (4 * 3600 * 1000) - 1000);
+  assert.ok(expiryMs <= after + (4 * 3600 * 1000) + 1000);
+  assert.equal(adminRepo.audits[0].metadata.expiresInHours, 4);
+});
+
 test("AdminService: license lifecycle: update, extend, suspend, reactivate, revoke", async () => {
   const adminRepo = new MemoryAdminRepository();
   const licenseRepo = new MemoryLicenseRepository(adminRepo);

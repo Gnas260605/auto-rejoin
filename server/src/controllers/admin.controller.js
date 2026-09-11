@@ -87,6 +87,34 @@ export class AdminController {
     }
   };
 
+  getPricing = async (_req, res, next) => {
+    try {
+      const plans = await this.service.getPricingSettings();
+      res.json({ ok: true, plans });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  updatePricing = async (req, res, next) => {
+    try {
+      const plans = await this.service.updatePricingSettings(req.body?.plans, {
+        adminId: req.admin.id,
+        ip: req.ip || req.socket?.remoteAddress
+      });
+      res.json({ ok: true, plans });
+    } catch (error) {
+      if (error instanceof AdminServiceError) {
+        return res.status(error.httpStatus).json({
+          ok: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      next(error);
+    }
+  };
+
   getStats = async (_req, res, next) => {
     try {
       const stats = await this.service.getStats();
@@ -108,6 +136,65 @@ export class AdminController {
   createLicense = async (req, res, next) => {
     try {
       const result = await this.service.createLicense(req.body, {
+        adminId: req.admin.id,
+        ip: req.ip || req.socket?.remoteAddress
+      });
+      res.status(201).json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof AdminServiceError) {
+        return res.status(error.httpStatus).json({
+          ok: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      next(error);
+    }
+  };
+
+  createDirectSale = async (req, res, next) => {
+    try {
+      const domain = `${req.protocol}://${req.get("host")}`;
+      const result = await this.service.createDirectSaleLicense({
+        ...req.body,
+        domain
+      }, {
+        adminId: req.admin.id,
+        ip: req.ip || req.socket?.remoteAddress
+      });
+      res.status(201).json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof AdminServiceError) {
+        return res.status(error.httpStatus).json({
+          ok: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      next(error);
+    }
+  };
+
+  getHandoverTemplate = async (req, res, next) => {
+    try {
+      const domain = `${req.protocol}://${req.get("host")}`;
+      const result = await this.service.getHandoverTemplate(req.params.id, { domain });
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof AdminServiceError) {
+        return res.status(error.httpStatus).json({
+          ok: false,
+          code: error.code,
+          message: error.message
+        });
+      }
+      next(error);
+    }
+  };
+
+  batchCreateLicenses = async (req, res, next) => {
+    try {
+      const result = await this.service.batchCreateLicenses(req.body, {
         adminId: req.admin.id,
         ip: req.ip || req.socket?.remoteAddress
       });
@@ -290,6 +377,29 @@ export class AdminController {
     try {
       const result = await this.service.listAuditLogs(req.query);
       res.json({ ok: true, ...result });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  getSetting = async (req, res, next) => {
+    try {
+      const data = await this.service.getSystemSetting(req.params.key);
+      res.json({ ok: true, data });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  setSetting = async (req, res, next) => {
+    try {
+      await this.service.setSystemSetting(
+        req.params.key,
+        req.body,
+        req.admin?.id,
+        { ip: req.ip || req.socket?.remoteAddress }
+      );
+      res.json({ ok: true, message: "Setting updated successfully" });
     } catch (error) {
       next(error);
     }

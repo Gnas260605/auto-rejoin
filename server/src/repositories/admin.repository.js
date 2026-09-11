@@ -132,7 +132,7 @@ export class AdminRepository {
   }
 
   // ── License Management ─────────────────────────────────────────────
-  async listLicenses({ page = 1, limit = 20, search, status, plan, expiringSoonDays } = {}) {
+  async listLicenses({ page = 1, limit = 20, search, status, plan, salesChannel, expiringSoonDays } = {}) {
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const safePage = Math.max(1, page);
     const offset = (safePage - 1) * safeLimit;
@@ -142,8 +142,8 @@ export class AdminRepository {
 
     if (search) {
       const cleanSearch = String(search).trim();
-      conditions.push("(l.license_key_prefix LIKE ? OR l.license_key_last4 LIKE ? OR l.id = ?)");
-      params.push(`%${cleanSearch}%`, `%${cleanSearch}%`, Number(cleanSearch) || 0);
+      conditions.push("(l.license_key_prefix LIKE ? OR l.license_key_last4 LIKE ? OR l.customer_name LIKE ? OR l.customer_contact LIKE ? OR l.id = ?)");
+      params.push(`%${cleanSearch}%`, `%${cleanSearch}%`, `%${cleanSearch}%`, `%${cleanSearch}%`, Number(cleanSearch) || 0);
     }
 
     if (status) {
@@ -154,6 +154,11 @@ export class AdminRepository {
     if (plan) {
       conditions.push("l.plan = ?");
       params.push(plan);
+    }
+
+    if (salesChannel) {
+      conditions.push("l.sales_channel = ?");
+      params.push(salesChannel);
     }
 
     if (expiringSoonDays && Number.isInteger(Number(expiringSoonDays))) {
@@ -180,6 +185,10 @@ export class AdminRepository {
          l.status,
          l.max_devices,
          l.expires_at,
+         l.customer_name,
+         l.customer_contact,
+         l.sales_channel,
+         l.customer_note,
          l.created_at,
          l.updated_at,
          (SELECT COUNT(*) FROM license_devices d WHERE d.license_id = l.id AND d.revoked_at IS NULL) AS active_devices_count
@@ -209,6 +218,10 @@ export class AdminRepository {
          l.status,
          l.max_devices,
          l.expires_at,
+         l.customer_name,
+         l.customer_contact,
+         l.sales_channel,
+         l.customer_note,
          l.created_at,
          l.updated_at,
          (SELECT COUNT(*) FROM license_devices d WHERE d.license_id = l.id AND d.revoked_at IS NULL) AS active_devices_count
@@ -385,4 +398,27 @@ export class AdminRepository {
       activeDevices: Number(activeDevicesRows[0]?.count || 0)
     };
   }
+
+  // ── System Settings ────────────────────────────────────────────────
+  async getSystemSetting(key) {
+    const [rows] = await this.pool.execute(
+      "SELECT setting_value FROM system_settings WHERE setting_key = ?",
+      [key]
+    );
+    if (!rows || rows.length === 0) return null;
+    const val = rows[0].setting_value;
+    return typeof val === "string" ? JSON.parse(val) : val;
+  }
+
+  async setSystemSetting(key, value) {
+    const jsonStr = JSON.stringify(value);
+    await this.pool.execute(
+      `INSERT INTO system_settings (setting_key, setting_value, updated_at)
+       VALUES (?, ?, UTC_TIMESTAMP())
+       ON DUPLICATE KEY UPDATE setting_value = ?, updated_at = UTC_TIMESTAMP()`,
+      [key, jsonStr, jsonStr]
+    );
+    return true;
+  }
 }
+

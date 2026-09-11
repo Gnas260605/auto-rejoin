@@ -12,13 +12,17 @@ import {
   XCircle,
   ChevronLeft,
   ChevronRight,
-  Filter
+  Filter,
+  Zap,
+  FileText,
+  UserCheck
 } from "lucide-react";
 import { api } from "../api/client.js";
 import { StatusBadge } from "../components/StatusBadge.jsx";
 import { StatsCards } from "../components/StatsCards.jsx";
 import { CreateLicenseModal } from "../components/CreateLicenseModal.jsx";
 import { ConfirmModal } from "../components/ConfirmModal.jsx";
+import DirectSaleModal from "../components/DirectSaleModal.jsx";
 
 export function LicensesPage({ onSelectLicense }) {
   const [licenses, setLicenses] = useState([]);
@@ -37,6 +41,8 @@ export function LicensesPage({ onSelectLicense }) {
 
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [directSaleModalOpen, setDirectSaleModalOpen] = useState(false);
+  const [handoverModalLicenseId, setHandoverModalLicenseId] = useState(null);
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
     title: "",
@@ -152,18 +158,27 @@ export function LicensesPage({ onSelectLicense }) {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-100 tracking-tight">License Management</h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Create, inspect, and enforce device allocations for Auto Rejoin Pro
+          <h2 className="text-xl font-bold text-zinc-100 tracking-tight">License Management</h2>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Quản lý, cấp phát và thu hồi key bản quyền Auto Rejoin Pro
           </p>
         </div>
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold rounded-xl text-sm shadow-lg shadow-emerald-500/20 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Create License</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDirectSaleModalOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold rounded-lg text-xs shadow-lg shadow-emerald-500/20 transition"
+          >
+            <Zap className="w-3.5 h-3.5 fill-current" />
+            <span>Bán Key Nhanh (Giao Khách)</span>
+          </button>
+          <button
+            onClick={() => setCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold rounded-lg text-xs transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Tạo Key Tùy Biến</span>
+          </button>
+        </div>
       </div>
 
       {/* Metrics Header */}
@@ -176,9 +191,9 @@ export function LicensesPage({ onSelectLicense }) {
       />
 
       {/* Controls / Filter Bar */}
-      <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col md:flex-row items-center gap-3">
+      <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 flex flex-col md:flex-row items-center gap-2.5">
         <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
           <input
             type="text"
             value={search}
@@ -186,21 +201,21 @@ export function LicensesPage({ onSelectLicense }) {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search by prefix, last 4 digits, or ID..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+            placeholder="Tìm theo key, tên khách hàng, số điện thoại, ghi chú..."
+            className="w-full pl-9 pr-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-200 placeholder-zinc-600 text-xs focus:outline-none focus:border-zinc-700"
           />
         </div>
 
-        <div className="flex items-center gap-2.5 w-full md:w-auto">
+        <div className="flex items-center gap-2 w-full md:w-auto">
           <select
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
               setPage(1);
             }}
-            className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 capitalize"
+            className="px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-300 text-xs focus:outline-none focus:border-zinc-700 capitalize"
           >
-            <option value="">All Statuses</option>
+            <option value="">Tất cả trạng thái</option>
             <option value="active">Active</option>
             <option value="suspended">Suspended</option>
             <option value="revoked">Revoked</option>
@@ -213,9 +228,9 @@ export function LicensesPage({ onSelectLicense }) {
               setPlanFilter(e.target.value);
               setPage(1);
             }}
-            className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 capitalize"
+            className="px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-300 text-xs focus:outline-none focus:border-zinc-700 capitalize"
           >
-            <option value="">All Plans</option>
+            <option value="">Tất cả gói</option>
             {plans.map((p) => (
               <option key={p.plan} value={p.plan}>
                 {p.plan}
@@ -225,114 +240,134 @@ export function LicensesPage({ onSelectLicense }) {
 
           <button
             onClick={loadData}
-            title="Refresh"
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors shrink-0"
+            title="Tải lại"
+            className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-md transition-colors shrink-0"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
       </div>
 
       {/* Table Section */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-xl">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 overflow-hidden">
         {error ? (
-          <div className="p-8 text-center text-rose-400 text-sm flex items-center justify-center gap-2">
-            <AlertTriangle className="w-5 h-5" />
+          <div className="p-6 text-center text-rose-400 text-xs flex items-center justify-center gap-2">
+            <AlertTriangle className="w-4 h-4" />
             <span>{error}</span>
           </div>
         ) : licenses.length === 0 && !loading ? (
-          <div className="p-12 text-center text-slate-500">
-            <Key className="w-10 h-10 mx-auto mb-3 text-slate-600 opacity-60" />
-            <p className="text-base font-semibold text-slate-400">No licenses found</p>
-            <p className="text-xs text-slate-500 mt-1">Try adjusting your search criteria or create a new license.</p>
+          <div className="p-10 text-center text-zinc-500">
+            <Key className="w-8 h-8 mx-auto mb-2 text-zinc-600 opacity-60" />
+            <p className="text-sm font-medium text-zinc-400">Không tìm thấy license nào</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Thử điều chỉnh bộ lọc hoặc bấm "Bán Key Nhanh".</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950/80 border-b border-slate-800 text-xs uppercase tracking-wider text-slate-400">
+            <table className="w-full text-left text-xs text-zinc-300">
+              <thead className="bg-zinc-950/80 border-b border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-400">
                 <tr>
-                  <th className="py-3.5 px-5 font-semibold">License Key</th>
-                  <th className="py-3.5 px-5 font-semibold">Plan</th>
-                  <th className="py-3.5 px-5 font-semibold">Status</th>
-                  <th className="py-3.5 px-5 font-semibold">Devices</th>
-                  <th className="py-3.5 px-5 font-semibold">Expires</th>
-                  <th className="py-3.5 px-5 font-semibold">Created</th>
-                  <th className="py-3.5 px-5 font-semibold text-right">Actions</th>
+                  <th className="py-3 px-4 font-semibold">License Key / Khách hàng</th>
+                  <th className="py-3 px-4 font-semibold">Gói cước</th>
+                  <th className="py-3 px-4 font-semibold">Trạng thái</th>
+                  <th className="py-3 px-4 font-semibold">Thiết bị</th>
+                  <th className="py-3 px-4 font-semibold">Hết hạn</th>
+                  <th className="py-3 px-4 font-semibold">Ngày tạo</th>
+                  <th className="py-3 px-4 font-semibold text-right">Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-zinc-800/50">
                 {licenses.map((lic) => (
-                  <tr key={lic.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-4 px-5">
+                  <tr key={lic.id} className="hover:bg-zinc-800/30 transition-colors">
+                    <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                        <span className="font-mono text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
                           {lic.displayKey}
                         </span>
-                        <span className="text-[10px] text-slate-500 font-mono">#{lic.id}</span>
+                        <span className="text-[10px] text-zinc-500 font-mono">#{lic.id}</span>
                       </div>
+                      {lic.customerName && (
+                        <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-300">
+                          <span className="font-semibold text-cyan-300">👤 {lic.customerName}</span>
+                          {lic.customerContact && (
+                            <span className="text-[10px] text-slate-400">({lic.customerContact})</span>
+                          )}
+                          {lic.salesChannel && (
+                            <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
+                              {lic.salesChannel}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-4 px-5">
-                      <span className="inline-block px-2 py-0.5 rounded text-xs font-bold uppercase bg-slate-800 text-slate-200 border border-slate-700">
+                    <td className="py-3 px-4">
+                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-zinc-800 text-zinc-200 border border-zinc-700">
                         {lic.plan}
                       </span>
-                      <span className="text-xs text-slate-500 block mt-0.5">
-                        {lic.maxInstances} instances
+                      <span className="text-[10px] text-zinc-500 block mt-0.5">
+                        {lic.maxInstances} clone
                       </span>
                     </td>
-                    <td className="py-4 px-5">
+                    <td className="py-3 px-4">
                       <StatusBadge status={lic.status} />
                     </td>
-                    <td className="py-4 px-5">
-                      <span className="font-medium text-slate-200">
+                    <td className="py-3 px-4">
+                      <span className="font-medium text-zinc-200">
                         {lic.activeDeviceCount} / {lic.maxDevices}
                       </span>
                     </td>
-                    <td className="py-4 px-5 text-xs text-slate-400">
+                    <td className="py-3 px-4 text-xs text-zinc-400">
                       {formatDate(lic.expiresAt)}
                     </td>
-                    <td className="py-4 px-5 text-xs text-slate-500">
+                    <td className="py-3 px-4 text-xs text-zinc-500">
                       {formatDate(lic.createdAt)}
                     </td>
-                    <td className="py-4 px-5 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setHandoverModalLicenseId(lic.id)}
+                          title="Lấy mẫu bàn giao gửi khách"
+                          className="p-1.5 text-cyan-400 hover:text-cyan-200 hover:bg-cyan-500/10 rounded transition-colors"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={() => onSelectLicense(lic.id)}
-                          title="View Details"
-                          className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                          title="Chi tiết thiết bị"
+                          className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded transition-colors"
                         >
-                          <Eye className="w-4 h-4" />
+                          <Eye className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => setExtendModal({ isOpen: true, license: lic, days: 30 })}
-                          title="Extend Duration"
-                          className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
+                          title="Gia hạn"
+                          className="p-1.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded transition-colors"
                         >
-                          <Calendar className="w-4 h-4" />
+                          <Calendar className="w-3.5 h-3.5" />
                         </button>
                         {lic.status === "active" ? (
                           <button
                             onClick={() => handleSuspend(lic)}
-                            title="Suspend License"
-                            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors"
+                            title="Tạm ngưng"
+                            className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 rounded transition-colors"
                           >
-                            <Pause className="w-4 h-4" />
+                            <Pause className="w-3.5 h-3.5" />
                           </button>
                         ) : lic.status === "suspended" ? (
                           <button
                             onClick={() => handleReactivate(lic)}
-                            title="Reactivate License"
-                            className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                            title="Kích hoạt lại"
+                            className="p-1.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded transition-colors"
                           >
-                            <Play className="w-4 h-4" />
+                            <Play className="w-3.5 h-3.5" />
                           </button>
                         ) : null}
                         {lic.status !== "revoked" && (
                           <button
                             onClick={() => handleRevoke(lic)}
-                            title="Revoke License"
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                            title="Thu hồi vĩnh viễn"
+                            className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 rounded transition-colors"
                           >
-                            <XCircle className="w-4 h-4" />
+                            <XCircle className="w-3.5 h-3.5" />
                           </button>
                         )}
                       </div>
@@ -345,28 +380,28 @@ export function LicensesPage({ onSelectLicense }) {
         )}
 
         {/* Pagination Bar */}
-        <div className="px-5 py-3.5 bg-slate-950/60 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+        <div className="px-4 py-3 bg-zinc-950/60 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
           <div>
-            Showing <span className="font-semibold text-slate-200">{licenses.length}</span> of{" "}
-            <span className="font-semibold text-slate-200">{totalItems}</span> licenses
+            Hiển thị <span className="font-semibold text-zinc-200">{licenses.length}</span> trên{" "}
+            <span className="font-semibold text-zinc-200">{totalItems}</span> license
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition-colors"
+              className="p-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-800 transition-colors"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
             <span>
-              Page <span className="font-semibold text-slate-200">{page}</span> of {totalPages}
+              Trang <span className="font-semibold text-zinc-200">{page}</span> / {totalPages}
             </span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition-colors"
+              className="p-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-800 transition-colors"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -378,6 +413,17 @@ export function LicensesPage({ onSelectLicense }) {
         onClose={() => setCreateModalOpen(false)}
         onCreated={() => loadData()}
         plans={plans}
+      />
+
+      {/* Direct Sale & Handover Modal */}
+      <DirectSaleModal
+        isOpen={directSaleModalOpen || Boolean(handoverModalLicenseId)}
+        initialLicenseId={handoverModalLicenseId}
+        onClose={() => {
+          setDirectSaleModalOpen(false);
+          setHandoverModalLicenseId(null);
+        }}
+        onSuccess={() => loadData()}
       />
 
       {/* Confirm Action Modal */}
@@ -399,15 +445,15 @@ export function LicensesPage({ onSelectLicense }) {
       {/* Extend Modal */}
       {extendModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
-          <div className="relative w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-2">Extend License Duration</h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Extend expiry for {extendModal.license?.prefix}...{extendModal.license?.last4}
+          <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-lg p-5">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Gia Hạn Thời Gian License</h3>
+            <p className="text-xs text-zinc-400 mb-3">
+              Gia hạn cho license {extendModal.license?.prefix}...{extendModal.license?.last4}
             </p>
-            <form onSubmit={handleExtendSubmit} className="space-y-4">
+            <form onSubmit={handleExtendSubmit} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
-                  Additional Days
+                <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                  Số ngày gia hạn thêm
                 </label>
                 <input
                   type="number"
@@ -415,23 +461,23 @@ export function LicensesPage({ onSelectLicense }) {
                   max="3650"
                   value={extendModal.days}
                   onChange={(e) => setExtendModal({ ...extendModal, days: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-sm focus:ring-2 focus:ring-emerald-500/50"
+                  className="w-full px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-100 text-xs focus:outline-none focus:border-zinc-700"
                   required
                 />
               </div>
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-800">
                 <button
                   type="button"
                   onClick={() => setExtendModal({ isOpen: false, license: null, days: 30 })}
-                  className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-lg"
+                  className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-md"
                 >
-                  Cancel
+                  Hủy
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg shadow-md shadow-emerald-500/20"
+                  className="px-3 py-1.5 text-xs font-semibold text-zinc-950 bg-emerald-500 hover:bg-emerald-400 rounded-md transition-colors"
                 >
-                  Extend Expiry
+                  Xác nhận gia hạn
                 </button>
               </div>
             </form>

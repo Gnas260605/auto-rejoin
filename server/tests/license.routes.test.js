@@ -126,7 +126,7 @@ test("activation, validation, and deactivation match shell client contract", asy
   assert.equal(activation.body.licenseId, "lic_7");
   assert.equal(activation.body.plan, "standard");
   assert.equal(activation.body.maxInstances, 5);
-  assert.deepEqual(activation.body.features, ["monitor", "doctor", "discord", "profiles"]);
+  assert.deepEqual(activation.body.features, ["monitor", "doctor", "low_server", "anti_afk", "discord", "profiles"]);
   assert.equal(typeof activation.body.token, "string");
 
   const validation = await request(app)

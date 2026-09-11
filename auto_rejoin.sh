@@ -359,6 +359,16 @@ launch_roblox() {
             return 1
         fi
     elif [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
+        if declare -F entitlement_require_feature >/dev/null 2>&1; then
+            if ! entitlement_require_feature low_server "Low Server" >/dev/null 2>&1; then
+                log_msg "${YLW}[LICENSE]${NC} License hien tai khong co Low Server; dung matchmaking mac dinh."
+                link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                    log_msg "${RED}[LAUNCH]${NC} Place ID khong hop le."
+                    return 1
+                }
+            fi
+        fi
+        if [ -z "$link" ]; then
         local idx; idx=$(get_package_index "$pkg")
         local retry_offset=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + ${RUNTIME_BACKOFF_FAILURES:-0} + ${LOBBY_RETRY_COUNT:-0} ))
         idx=$((idx + retry_offset))
@@ -397,6 +407,7 @@ launch_roblox() {
                 }
             fi
         fi
+        fi
     else
         link="$(roblox_build_game_uri "$PLACE_ID")" || {
             log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
@@ -406,6 +417,13 @@ launch_roblox() {
 
     local freeform_args=""
     local bounds_args=()
+    if [ "$FREEFORM_LAYOUT" = "true" ] && declare -F entitlement_require_feature >/dev/null 2>&1; then
+        if ! entitlement_require_feature freeform Freeform >/dev/null 2>&1; then
+            log_msg "${YLW}[LICENSE]${NC} License hien tai khong co Freeform; tat Freeform Layout cho lan launch nay."
+            FREEFORM_LAYOUT="false"
+        fi
+    fi
+
     if [ "$FREEFORM_LAYOUT" = "true" ]; then
         # Đảm bảo bật freeform trong cài đặt hệ thống Android
         android_settings put global enable_freeform_support 1 >/dev/null 2>&1

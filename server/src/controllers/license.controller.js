@@ -68,6 +68,50 @@ export class LicenseController {
     res.status(response.valid ? 200 : this.statusForCode(response.code)).json(response);
   };
 
+  lookup = async (req, res) => {
+    try {
+      const { licenseKey } = req.body || {};
+      if (!licenseKey) {
+        return res.status(400).json({ ok: false, message: "licenseKey is required" });
+      }
+      const data = await this.service.lookupLicense(licenseKey);
+      res.json({ ok: true, data });
+    } catch (error) {
+      res.status(error.httpStatus || 400).json({ ok: false, code: error.code, message: error.message });
+    }
+  };
+
+  customerResetDevice = async (req, res) => {
+    try {
+      const { licenseKey, deviceId } = req.body || {};
+      if (!licenseKey || !deviceId) {
+        return res.status(400).json({ ok: false, message: "licenseKey and deviceId are required" });
+      }
+      const result = await this.service.customerResetDevice(licenseKey, deviceId);
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(error.httpStatus || 400).json({ ok: false, code: error.code, message: error.message });
+    }
+  };
+
+  createOrder = async (req, res) => {
+    try {
+      const result = await this.service.createCustomerOrder(req.body);
+      res.status(201).json({ ok: true, ...result });
+    } catch (error) {
+      res.status(error.httpStatus || 400).json({ ok: false, message: error.message });
+    }
+  };
+
+  getPublicPricing = async (_req, res) => {
+    try {
+      const plans = await this.service.getPublicPricing();
+      res.json({ ok: true, plans });
+    } catch (error) {
+      res.status(500).json({ ok: false, message: error.message });
+    }
+  };
+
   statusForCode(code) {
     switch (code) {
       case "DEVICE_LIMIT":

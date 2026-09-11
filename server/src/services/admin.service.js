@@ -4,6 +4,7 @@ import {
 } from "../constants/admin.js";
 import {
   LICENSE_STATUSES,
+  DEFAULT_PRICING_PLANS,
   PLAN_ENTITLEMENTS
 } from "../constants/license.js";
 import {
@@ -24,6 +25,69 @@ export class AdminServiceError extends Error {
     this.code = code;
     this.httpStatus = httpStatus;
   }
+}
+
+function resolveLicenseExpiry(data = {}) {
+  if (data.expiresInHours !== undefined && data.expiresInHours !== null) {
+    const hours = Number(data.expiresInHours);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 87600) {
+      throw new AdminServiceError("INVALID_EXPIRY", "expiresInHours must be between 1 and 87600", 400);
+    }
+    return {
+      expiresAt: secondsFromNow(hours * 3600),
+      expiresInHours: hours,
+      expiresInDays: null
+    };
+  }
+
+  if (data.expiresInDays !== undefined && data.expiresInDays !== null) {
+    const days = Number(data.expiresInDays);
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      throw new AdminServiceError("INVALID_EXPIRY", "expiresInDays must be between 1 and 3650", 400);
+    }
+    return {
+      expiresAt: secondsFromNow(days * 86400),
+      expiresInHours: null,
+      expiresInDays: days
+    };
+  }
+
+  if (data.expiresAt) {
+    const date = new Date(data.expiresAt);
+    if (Number.isNaN(date.getTime())) {
+      throw new AdminServiceError("INVALID_EXPIRY", "Invalid expiresAt date format", 400);
+    }
+    return {
+      expiresAt: date,
+      expiresInHours: null,
+      expiresInDays: null
+    };
+  }
+
+  return {
+    expiresAt: null,
+    expiresInHours: null,
+    expiresInDays: null
+  };
+}
+
+function formatExpiryText({ expiresAt, expiresInHours, expiresInDays }) {
+  if (!expiresAt) {
+    return "Vinh vien";
+  }
+  if (expiresInHours) {
+    return `${expiresInHours} gio (Het han: ${expiresAt.toLocaleString("vi-VN")})`;
+  }
+  if (expiresInDays) {
+    return `${expiresInDays} ngay (Het han: ${expiresAt.toLocaleDateString("vi-VN")})`;
+  }
+  return expiresAt.toLocaleString("vi-VN");
+}
+
+function buildAllInOneCommand({ domain, placeId, rawKey }) {
+  const apiBase = String(domain || "http://localhost:3000").replace(/\/$/, "");
+  const targetPlaceId = String(placeId || "107778070777162").trim();
+  return `cd ~; rm -rf auto-rejoin; mkdir -p auto-rejoin; cd auto-rejoin; curl -fSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh; AUTO_REJOIN_LICENSE_API="${apiBase}" AUTO_REJOIN_LICENSE_MODE=required LICENSE_KEY="${rawKey}" JOIN_LOW_SERVER=true LOW_SERVER_MIN_PLAYERS=0 LOW_SERVER_MAX_PLAYERS=2 LOW_SERVER_STRICT=true bash setup.sh ${targetPlaceId}`;
 }
 
 export class AdminService {
@@ -128,6 +192,59 @@ export class AdminService {
     }));
   }
 
+  async getPricingSettings() {
+    const plans = await this.adminRepo.getSystemSetting("pricing_plans");
+    if (!plans || !Array.isArray(plans)) {
+      return this.getDefaultPricingPlans();
+    }
+    return plans;
+  }
+
+  getDefaultPricingPlans() {
+    return DEFAULT_PRICING_PLANS.map((plan) => ({
+      ...plan,
+      features: [...plan.features]
+    }));
+  }
+
+  async updatePricingSettings(plans, adminContext = {}) {
+    if (!Array.isArray(plans) || plans.length === 0) {
+      throw new AdminServiceError("INVALID_PLANS", "Plans must be a non-empty array", 400);
+    }
+
+    // Format & validate each plan
+    const sanitizedPlans = plans.map((p) => {
+      const priceNum = Number(p.priceNumber) || 0;
+      return {
+        id: String(p.id || "").trim() || "plan",
+        name: String(p.name || "").trim() || "Gói cước",
+        badge: p.badge ? String(p.badge).trim() : null,
+        duration: String(p.duration || "").trim() || "30 ngày",
+        priceNumber: Math.max(0, priceNum),
+        priceFormatted: priceNum.toLocaleString("vi-VN"),
+        plan: String(p.plan || "pro"),
+        maxDevices: Math.max(1, Number(p.maxDevices) || 1),
+        enabled: p.enabled !== false,
+        highlight: Boolean(p.highlight),
+        description: String(p.description || "").trim(),
+        features: Array.isArray(p.features) ? p.features.map(f => String(f).trim()).filter(Boolean) : []
+      };
+    });
+
+    await this.adminRepo.setSystemSetting("pricing_plans", sanitizedPlans);
+
+    await this.adminRepo.insertAudit({
+      adminUserId: adminContext.adminId,
+      action: "pricing_updated",
+      targetType: "settings",
+      targetId: "pricing_plans",
+      ipAddress: adminContext.ip,
+      metadata: { planCount: sanitizedPlans.length }
+    });
+
+    return sanitizedPlans;
+  }
+
   async getStats() {
     return this.adminRepo.getDashboardStats();
   }
@@ -156,6 +273,10 @@ export class AdminService {
         maxInstances: entitlements.maxInstances,
         features: entitlements.features,
         activeDeviceCount: Number(lic.active_devices_count || 0),
+        customerName: lic.customer_name || null,
+        customerContact: lic.customer_contact || null,
+        salesChannel: lic.sales_channel || "direct",
+        customerNote: lic.customer_note || null,
         expiresAt: lic.expires_at ? new Date(lic.expires_at).toISOString() : null,
         createdAt: new Date(lic.created_at).toISOString(),
         updatedAt: new Date(lic.updated_at).toISOString()
@@ -182,20 +303,8 @@ export class AdminService {
       throw new AdminServiceError("INVALID_MAX_DEVICES", "maxDevices must be an integer between 1 and 10000", 400);
     }
 
-    let expiresAt = null;
-    if (data.expiresInDays !== undefined && data.expiresInDays !== null) {
-      const days = Number(data.expiresInDays);
-      if (!Number.isInteger(days) || days < 1 || days > 3650) {
-        throw new AdminServiceError("INVALID_EXPIRY", "expiresInDays must be between 1 and 3650", 400);
-      }
-      expiresAt = secondsFromNow(days * 86400);
-    } else if (data.expiresAt) {
-      const date = new Date(data.expiresAt);
-      if (Number.isNaN(date.getTime())) {
-        throw new AdminServiceError("INVALID_EXPIRY", "Invalid expiresAt date format", 400);
-      }
-      expiresAt = date;
-    }
+    const expiry = resolveLicenseExpiry(data);
+    const { expiresAt } = expiry;
 
     if (!this.config.license.keyPepper || this.config.license.keyPepper.length < 16) {
       throw new AdminServiceError("SERVER_CONFIG_ERROR", "LICENSE_KEY_PEPPER is not configured", 500);
@@ -223,6 +332,8 @@ export class AdminService {
         adminUserId: adminContext.adminId,
         plan,
         maxDevices,
+        expiresInHours: expiry.expiresInHours,
+        expiresInDays: expiry.expiresInDays,
         expiresAt: expiresAt ? expiresAt.toISOString() : null
       }
     });
@@ -236,6 +347,8 @@ export class AdminService {
       metadata: {
         plan,
         maxDevices,
+        expiresInHours: expiry.expiresInHours,
+        expiresInDays: expiry.expiresInDays,
         expiresAt: expiresAt ? expiresAt.toISOString() : null
       }
     });
@@ -256,6 +369,146 @@ export class AdminService {
         expiresAt: expiresAt ? expiresAt.toISOString() : null
       },
       licenseKey: rawKey
+    };
+  }
+
+  async createDirectSaleLicense(data, adminContext = {}) {
+    const plan = data.plan || "pro";
+    const customerName = String(data.customerName || "Khách hàng cá nhân").trim();
+    const customerContact = String(data.customerContact || "").trim();
+    const salesChannel = String(data.salesChannel || "direct").trim();
+    const customerNote = String(data.customerNote || "").trim();
+    const domain = data.domain || "http://localhost:5173";
+    const placeId = String(data.placeId || "107778070777162").trim();
+
+    let maxDevices = Number(data.maxDevices) || 1;
+    const expiry = resolveLicenseExpiry({
+      ...data,
+      expiresInDays: data.expiresInDays === 0 ? null : data.expiresInDays
+    });
+    const { expiresAt } = expiry;
+
+    if (!this.config.license.keyPepper || this.config.license.keyPepper.length < 16) {
+      throw new AdminServiceError("SERVER_CONFIG_ERROR", "LICENSE_KEY_PEPPER is not configured", 500);
+    }
+
+    const rawKey = generateLicenseKey();
+    const normalizedKey = rawKey.toUpperCase();
+    const display = displayPartsForKey(normalizedKey);
+    const keyHash = hashLicenseKey(normalizedKey, this.config.license.keyPepper);
+
+    const licenseId = await this.licenseRepo.createLicense({
+      keyHash,
+      keyPrefix: display.prefix,
+      keyLast4: display.last4,
+      plan,
+      maxDevices,
+      expiresAt,
+      customerName,
+      customerContact,
+      salesChannel,
+      customerNote
+    });
+
+    await this.licenseRepo.insertEvent({
+      licenseId,
+      eventType: "direct_sale_issued",
+      ipAddress: adminContext.ip,
+      metadata: {
+        adminUserId: adminContext.adminId,
+        customerName,
+        customerContact,
+        salesChannel,
+        plan,
+        maxDevices,
+        placeId,
+        expiresInHours: expiry.expiresInHours,
+        expiresInDays: expiry.expiresInDays,
+        expiresAt: expiresAt ? expiresAt.toISOString() : null
+      }
+    });
+
+    await this.adminRepo.insertAudit({
+      adminUserId: adminContext.adminId,
+      action: "direct_license_sold",
+      targetType: "license",
+      targetId: String(licenseId),
+      ipAddress: adminContext.ip,
+      metadata: { customerName, salesChannel, plan, maxDevices, placeId, expiresInHours: expiry.expiresInHours, expiresInDays: expiry.expiresInDays }
+    });
+
+    const expiryText = formatExpiryText(expiry);
+
+    const planName = data.planName || (plan === "business" ? "Trọn Đời (Lifetime)" : plan === "pro" ? "Gói Pro (Cao Cấp)" : "Gói Basic (Cơ Bản)");
+    const allInOneCommand = buildAllInOneCommand({ domain, placeId, rawKey });
+
+    const handoverText = 
+`🎁 BÀN GIAO LICENSE KEY - AUTO REJOIN PRO
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 Khách hàng: ${customerName}
+🔑 License Key: ${rawKey}
+📦 Gói cước: ${planName}
+📱 Giới hạn thiết bị: ${maxDevices} máy chạy cùng lúc
+⏳ Thời hạn sử dụng: ${expiryText}
+🎮 Place ID: ${placeId}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 CỔNG TỰ PHỤC VỤ & TRA CỨU / ĐỔI MÁY:
+👉 ${domain}/portal
+(Nhập mã Key để xem hạn dùng và tự bấm gỡ/đổi máy 24/7)
+
+💻 LỆNH ALL-IN-ONE ANDROID / TERMUX:
+${allInOneCommand}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💬 Cảm ơn bạn đã tin dùng Auto Rejoin Pro! Chúc bạn farm game hiệu quả.`;
+
+    return {
+      ok: true,
+      licenseId,
+      rawKey,
+      customerName,
+      salesChannel,
+      plan,
+      maxDevices,
+      placeId,
+      expiresAt: expiresAt ? expiresAt.toISOString() : null,
+      allInOneCommand,
+      handoverTemplate: handoverText
+    };
+  }
+
+  async getHandoverTemplate(licenseId, { domain = "http://localhost:5173" } = {}) {
+    const license = await this.adminRepo.findLicenseById(licenseId);
+    if (!license) {
+      throw new AdminServiceError("LICENSE_NOT_FOUND", "License not found", 404);
+    }
+
+    const customerName = license.customer_name || "Khách hàng";
+    const planName = license.plan === "business" ? "Trọn Đời (Lifetime)" : license.plan === "pro" ? "Gói Pro" : "Gói Basic";
+    const expiryText = license.expires_at
+      ? new Date(license.expires_at).toLocaleDateString("vi-VN")
+      : "Vĩnh viễn (Trọn Đời)";
+    const keyDisplay = `${license.license_key_prefix}••••••••••••${license.license_key_last4}`;
+
+    const handoverText = 
+`🎁 THÔNG TIN LICENSE KEY - AUTO REJOIN PRO
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 Khách hàng: ${customerName}
+🔑 Mã License: ${keyDisplay}
+📦 Gói cước: ${planName}
+📱 Giới hạn thiết bị: ${license.max_devices} máy chạy cùng lúc
+⏳ Hạn dùng: ${expiryText}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 CỔNG TỰ PHỤC VỤ & TRA CỨU / ĐỔI MÁY:
+👉 ${domain}/portal
+(Nhập mã Key để xem hạn dùng và tự bấm gỡ/đổi máy 24/7)
+
+💬 Cần hỗ trợ: Liên hệ Admin trực tiếp để được trợ giúp 24/7!`;
+
+    return {
+      ok: true,
+      licenseId: license.id,
+      customerName,
+      handoverTemplate: handoverText
     };
   }
 
@@ -533,5 +786,25 @@ export class AdminService {
       limit: result.limit,
       totalPages: result.totalPages
     };
+  }
+
+  // ── Generic System Settings (API Keys, Marketing, SEO) ───────────────
+  async getSystemSetting(key) {
+    return await this.adminRepo.getSystemSetting(key);
+  }
+
+  async setSystemSetting(key, value, adminId, context = {}) {
+    await this.adminRepo.setSystemSetting(key, value);
+    if (adminId) {
+      await this.adminRepo.insertAudit({
+        adminUserId: adminId,
+        action: "UPDATE_SYSTEM_SETTING",
+        targetType: "setting",
+        targetId: key,
+        ipAddress: context.ip,
+        metadata: { key }
+      });
+    }
+    return true;
   }
 }

@@ -1,20 +1,41 @@
 import React, { useState } from "react";
-import { Key, History, LogOut, Shield, Menu, X, Terminal, ExternalLink } from "lucide-react";
+import {
+  Key,
+  History,
+  LogOut,
+  Shield,
+  Menu,
+  X,
+  Terminal,
+  TrendingUp,
+  ShoppingBag,
+  Search,
+  ExternalLink,
+  Sliders,
+  Code,
+  Target,
+  CreditCard
+} from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 
-export function AdminLayout({ activePage = "licenses", onNavigate, children }) {
+export function AdminLayout({ activePage = "dashboard", onNavigate, children }) {
   const { admin, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const navItems = [
-    { id: "licenses", label: "Licenses", icon: Key },
-    { id: "audits", label: "Audit Logs", icon: History }
+    { id: "dashboard", label: "Tổng Quan & Doanh Thu", icon: TrendingUp },
+    { id: "licenses", label: "Quản Lý License Key", icon: Key },
+    { id: "payos", label: "Quản Lý PayOS & Cổng TT", icon: CreditCard },
+    { id: "pricing", label: "Bảng Giá & Gói Cước", icon: Sliders },
+    { id: "api", label: "Quản Lý API & Tích Hợp", icon: Code },
+    { id: "marketing", label: "Google Ads & SEO", icon: Target },
+    { id: "audits", label: "Nhật Ký Quản Trị", icon: History }
   ];
 
   return (
-    <div className="flex min-h-screen bg-slate-950 text-slate-100">
+    <div className="flex min-h-screen bg-[#080D17] text-slate-100">
       {/* Sidebar Desktop */}
-      <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-slate-900/50 backdrop-blur-xl shrink-0 p-5">
+      <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-[#0B1322] shrink-0 p-5">
         <div className="flex items-center gap-3 px-2 py-3 mb-6">
           <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl">
             <Terminal className="w-5 h-5" />
@@ -44,6 +65,34 @@ export function AdminLayout({ activePage = "licenses", onNavigate, children }) {
               </button>
             );
           })}
+
+          <div className="pt-4 pb-1">
+            <span className="px-3.5 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+              Khách Hàng & Store
+            </span>
+          </div>
+
+          <button
+            onClick={() => onNavigate("storefront")}
+            className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-teal-300 hover:bg-slate-800/60 transition-all"
+          >
+            <div className="flex items-center gap-2.5">
+              <ShoppingBag className="w-4 h-4 text-teal-400" />
+              <span>Trang Bán Key</span>
+            </div>
+            <ExternalLink className="w-3 h-3 text-slate-500" />
+          </button>
+
+          <button
+            onClick={() => onNavigate("portal")}
+            className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-cyan-300 hover:bg-slate-800/60 transition-all"
+          >
+            <div className="flex items-center gap-2.5">
+              <Search className="w-4 h-4 text-cyan-400" />
+              <span>Cổng Tra Cứu Key</span>
+            </div>
+            <ExternalLink className="w-3 h-3 text-slate-500" />
+          </button>
         </nav>
 
         <div className="pt-4 border-t border-slate-800/80 space-y-3">

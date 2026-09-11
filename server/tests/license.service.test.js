@@ -172,7 +172,7 @@ test("activate valid license returns token and entitlements", async () => {
   assert.equal(response.valid, true);
   assert.equal(response.plan, "pro");
   assert.equal(response.maxInstances, 20);
-  assert.deepEqual(response.features, ["monitor", "doctor", "discord", "profiles", "installer"]);
+  assert.deepEqual(response.features, ["monitor", "doctor", "low_server", "anti_afk", "discord", "profiles", "installer"]);
   assert.equal(response.token, "test-token-opaque-secret");
   assert.equal(repo.state.tokens[0].token_hash, hashToken("test-token-opaque-secret"));
   assert.notEqual(repo.state.tokens[0].token_hash, "test-token-opaque-secret");

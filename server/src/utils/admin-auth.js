@@ -4,8 +4,8 @@ import jwt from "jsonwebtoken";
 const BCRYPT_ROUNDS = 10;
 
 export async function hashPassword(password) {
-  if (typeof password !== "string" || password.length < 12) {
-    throw new Error("Password must be at least 12 characters");
+  if (typeof password !== "string" || password.length < 6) {
+    throw new Error("Password must be at least 6 characters");
   }
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }

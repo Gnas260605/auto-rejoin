@@ -97,6 +97,9 @@ echo -e "${BGRN}╠════════════════════�
 
 PLACE_ID="${1:-}"
 PRIVATE_CODE="${2:-}"
+SETUP_LICENSE_KEY="${AUTO_REJOIN_LICENSE_KEY:-${LICENSE_KEY:-${3:-}}}"
+SETUP_LICENSE_MODE="${AUTO_REJOIN_LICENSE_MODE:-${LICENSE_MODE:-optional}}"
+SETUP_LICENSE_API="${AUTO_REJOIN_LICENSE_API:-${LICENSE_API:-}}"
 
 if [ -z "$PLACE_ID" ] && [ -f "${SCRIPT_DIR}/config.env" ]; then
     CFG_PLACE="$(grep -E '^PLACE_ID=' "${SCRIPT_DIR}/config.env" 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d '"\r')"
@@ -190,6 +193,33 @@ if [ -f "${SCRIPT_DIR}/lib/android.sh" ]; then
     source "${SCRIPT_DIR}/lib/android.sh"
 fi
 
+if [ -f "${SCRIPT_DIR}/lib/network.sh" ]; then
+    # shellcheck source=lib/network.sh
+    source "${SCRIPT_DIR}/lib/network.sh"
+fi
+if [ -f "${SCRIPT_DIR}/lib/license.sh" ]; then
+    # shellcheck source=lib/license.sh
+    source "${SCRIPT_DIR}/lib/license.sh"
+fi
+
+if [ -n "$SETUP_LICENSE_KEY" ]; then
+    LICENSE_MODE="$SETUP_LICENSE_MODE"
+    LICENSE_API="$SETUP_LICENSE_API"
+    AUTO_REJOIN_LICENSE_MODE="$SETUP_LICENSE_MODE"
+    AUTO_REJOIN_LICENSE_API="$SETUP_LICENSE_API"
+    export LICENSE_MODE LICENSE_API AUTO_REJOIN_LICENSE_MODE AUTO_REJOIN_LICENSE_API
+    if [ -z "$LICENSE_API" ]; then
+        echo -e "  ${RED}x AUTO_REJOIN_LICENSE_API/LICENSE_API is required when LICENSE_KEY is provided${NC}"
+        exit 1
+    fi
+    echo -e "  ${CYN}[LICENSE]${NC} Activating license key..."
+    if ! license_activate "$SETUP_LICENSE_KEY" "$SCRIPT_DIR"; then
+        echo -e "  ${RED}x License activation failed. Setup stopped.${NC}"
+        exit 1
+    fi
+    echo -e "  ${BGRN}License activated; raw key was not saved to config${NC}"
+fi
+
 # ── BƯỚC 3/4: Phát hiện executor ──────────────────────────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║  [BƯỚC 3/4] Phát hiện phương thức hệ thống      ║${NC}"
@@ -262,60 +292,9 @@ echo ""
 # Dừng phiên tmux cũ
 tmux kill-session -t roblox-multi 2>/dev/null
 
-echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
-echo -e "${BGRN}║       KHỞI ĐỘNG BOT CHO TỪNG TÀI KHOẢN         ║${NC}"
-echo -e "${BGRN}╠══════════════════════════════════════════════════╣${NC}"
-
-COUNT=1
-TOTAL=$(echo "$PACKAGES" | wc -w)
-
-# -- KHONG HOI USERNAME NUA, TU DONG DOC TU CONFIG CU --
-echo -e "${BGRN}+------------------------------------------------------+${NC}"
-echo -e "${BGRN}|   DANG LAY USERNAME TU DONG / CONFIG CU...           |${NC}"
-echo -e "${BGRN}+------------------------------------------------------+${NC}"
-echo ""
-
-declare -A USERNAME_MAP
-idx=1
-for PKG in $PACKAGES; do
-    CFG="config_${PKG}.cfg"
-    # Lấy username đã lưu trước đó nếu có
-    OLD_UNAME=""
-    [ -f "$CFG" ] && OLD_UNAME=$(grep '^ROBLOX_USERNAME=' "$CFG" 2>/dev/null | cut -d'"' -f2)
-
-    SHORT_PKG="${PKG: -8}"   # Lấy 8 ký tự cuối để phân biệt (client, client1, ...)
-    if [ -n "$OLD_UNAME" ]; then
-        USERNAME_MAP["$PKG"]="$OLD_UNAME"
-    else
-        USERNAME_MAP["$PKG"]=""
-    fi
-    idx=$((idx+1))
-done
-echo ""
-
-# Đọc cấu hình mặc định từ config.cfg nếu có để làm giá trị fallback
-DEFAULT_WEBHOOK=""
-DEFAULT_CHECK_INTERVAL=30
-DEFAULT_AUTO_RESTART=7200
-DEFAULT_ANTI_AFK=true
-DEFAULT_TAP_INTERVAL=180
-DEFAULT_TAP_X=540
-DEFAULT_TAP_Y=960
-DEFAULT_FREEFORM_LAYOUT=false
-DEFAULT_FREEFORM_WIDTH=540
-DEFAULT_FREEFORM_HEIGHT=960
-DEFAULT_FREEFORM_OFFSET_X=60
-DEFAULT_FREEFORM_OFFSET_Y=80
-DEFAULT_ALLOW_UNSCOPED=false
-DEFAULT_ALLOW_HOME=false
-SETUP_JOIN_LOW_SERVER="${JOIN_LOW_SERVER:-}"
-SETUP_LOW_SERVER_MIN_PLAYERS="${LOW_SERVER_MIN_PLAYERS:-}"
-SETUP_LOW_SERVER_MAX_PLAYERS="${LOW_SERVER_MAX_PLAYERS:-}"
-SETUP_LOW_SERVER_STRICT="${LOW_SERVER_STRICT:-}"
-SETUP_ALLOW_UNSCOPED_DEEPLINK="${ALLOW_UNSCOPED_DEEPLINK:-}"
-SETUP_ALLOW_HOME_FALLBACK="${ALLOW_HOME_FALLBACK:-}"
-
 if [ -f "config.cfg" ]; then
+    DEFAULT_PLACE_ID=$(grep '^PLACE_ID=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+    DEFAULT_PRIVATE_CODE=$(grep '^PRIVATE_CODE=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     DEFAULT_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' config.cfg | cut -d'"' -f2 2>/dev/null)
     DEFAULT_CHECK_INTERVAL=$(grep '^CHECK_INTERVAL=' config.cfg | cut -d'=' -f2 2>/dev/null)
     DEFAULT_AUTO_RESTART=$(grep '^AUTO_RESTART_PERIOD=' config.cfg | cut -d'=' -f2 2>/dev/null)
@@ -346,7 +325,8 @@ for PKG in $PACKAGES; do
     WIN="${PKG//./_}"
     SAVED_USERNAME="${USERNAME_MAP[$PKG]:-}"
 
-    # Đọc và giữ lại cấu hình cũ của account này nếu đã tồn tại
+    EXISTING_PLACE_ID=""
+    EXISTING_PRIVATE_CODE=""
     EXISTING_WEBHOOK=""
     EXISTING_CHECK_INTERVAL=""
     EXISTING_AUTO_RESTART=""
@@ -367,6 +347,8 @@ for PKG in $PACKAGES; do
     EXISTING_ALLOW_HOME=""
 
     if [ -f "$CFG" ]; then
+        EXISTING_PLACE_ID=$(grep '^PLACE_ID=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+        EXISTING_PRIVATE_CODE=$(grep '^PRIVATE_CODE=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' "$CFG" | cut -d'"' -f2 2>/dev/null)
         EXISTING_CHECK_INTERVAL=$(grep '^CHECK_INTERVAL=' "$CFG" | cut -d'=' -f2 2>/dev/null)
         EXISTING_AUTO_RESTART=$(grep '^AUTO_RESTART_PERIOD=' "$CFG" | cut -d'=' -f2 2>/dev/null)
@@ -400,6 +382,8 @@ for PKG in $PACKAGES; do
     FREEFORM_HEIGHT="${EXISTING_FREEFORM_HEIGHT:-${DEFAULT_FREEFORM_HEIGHT:-960}}"
     FREEFORM_OFFSET_X="${EXISTING_FREEFORM_OFFSET_X:-${DEFAULT_FREEFORM_OFFSET_X:-60}}"
     FREEFORM_OFFSET_Y="${EXISTING_FREEFORM_OFFSET_Y:-${DEFAULT_FREEFORM_OFFSET_Y:-80}}"
+    LICENSE_MODE="$SETUP_LICENSE_MODE"
+    LICENSE_API="$SETUP_LICENSE_API"
     JOIN_LOW_SERVER="${SETUP_JOIN_LOW_SERVER:-${EXISTING_LOW_SERVER:-${DEFAULT_LOW_SERVER:-false}}}"
     LOW_SERVER_MIN_PLAYERS="${SETUP_LOW_SERVER_MIN_PLAYERS:-${EXISTING_LOW_MIN:-${DEFAULT_LOW_MIN:-1}}}"
     LOW_SERVER_MAX_PLAYERS="${SETUP_LOW_SERVER_MAX_PLAYERS:-${EXISTING_LOW_MAX:-${DEFAULT_LOW_MAX:-0}}}"
@@ -424,6 +408,8 @@ FREEFORM_WIDTH=$FREEFORM_WIDTH
 FREEFORM_HEIGHT=$FREEFORM_HEIGHT
 FREEFORM_OFFSET_X=$FREEFORM_OFFSET_X
 FREEFORM_OFFSET_Y=$FREEFORM_OFFSET_Y
+LICENSE_MODE=$LICENSE_MODE
+LICENSE_API="$LICENSE_API"
 JOIN_LOW_SERVER=$JOIN_LOW_SERVER
 LOW_SERVER_MIN_PLAYERS=$LOW_SERVER_MIN_PLAYERS
 LOW_SERVER_MAX_PLAYERS=$LOW_SERVER_MAX_PLAYERS

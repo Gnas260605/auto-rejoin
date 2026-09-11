@@ -233,6 +233,13 @@ monitor_handle_in_game() {
         LAST_AFK_TAP="$now"
     fi
 
+    if [ "$ANTI_AFK" = "true" ] && declare -F entitlement_require_feature >/dev/null 2>&1; then
+        if ! entitlement_require_feature anti_afk "Anti-AFK" >/dev/null 2>&1; then
+            log_msg "${YLW}[LICENSE]${NC} License hien tai khong co Anti-AFK; tat tap chong AFK."
+            ANTI_AFK="false"
+        fi
+    fi
+
     if [ "$ANTI_AFK" = "true" ] && [ $((now - LAST_AFK_TAP)) -ge "$AFK_TAP_INTERVAL" ]; then
         log_msg "${CYN}[AFK]${NC} Gửi tap tại ($TAP_X, $TAP_Y)"
         android_input_tap "$TAP_X" "$TAP_Y" >/dev/null 2>&1

@@ -44,7 +44,7 @@ function parseArgs(argv) {
 async function promptPassword() {
   const rl = readline.createInterface({ input, output });
   try {
-    const answer = await rl.question("Enter admin password (min 12 characters): ");
+    const answer = await rl.question("Enter admin password (min 6 characters): ");
     return answer.trim();
   } finally {
     rl.close();
@@ -59,8 +59,8 @@ async function main() {
     password = await promptPassword();
   }
 
-  if (!password || password.length < 12) {
-    throw new Error("Admin password must be at least 12 characters long");
+  if (!password || password.length < 6) {
+    throw new Error("Admin password must be at least 6 characters long");
   }
 
   const passwordHash = await hashPassword(password);

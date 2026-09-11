@@ -30,7 +30,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(16,185,129,0.15),rgba(255,255,255,0))]">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-transparent">
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl p-8 sm:p-10 shadow-2xl backdrop-blur-xl animate-fadeIn">
         <div className="text-center mb-8">
           <div className="inline-flex p-3.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl mb-4 shadow-lg shadow-emerald-500/10">
@@ -100,10 +100,17 @@ export function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-slate-800/80 text-center">
-          <p className="text-xs text-slate-500">
-            Protected endpoint &bull; Cryptographically audited &bull; Strict rate limits
-          </p>
+        <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs">
+          {onBackToStore ? (
+            <button
+              onClick={onBackToStore}
+              type="button"
+              className="text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
+            >
+              &larr; Về Trang Bán Key
+            </button>
+          ) : <span />}
+          <span className="text-slate-500">Auto Rejoin Pro v4.0</span>
         </div>
       </div>
     </div>
