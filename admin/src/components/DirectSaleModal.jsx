@@ -12,7 +12,11 @@ import {
   MessageSquare,
   Shield,
   ExternalLink,
-  FileText
+  FileText,
+  Gamepad2,
+  Globe,
+  RotateCcw,
+  Sparkles
 } from "lucide-react";
 import { api } from "../api/client";
 
@@ -24,13 +28,22 @@ const CHANNEL_OPTIONS = [
   { id: "direct", label: "Trực tiếp / Khác", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" }
 ];
 
+const POPULAR_GAMES = [
+  { name: "Steal A Brainrot", placeId: "107778070777162", icon: "🧠" },
+  { name: "Blox Fruits", placeId: "2753915549", icon: "⚔️" },
+  { name: "Fisch", placeId: "16732694052", icon: "🎣" },
+  { name: "King Legacy", placeId: "4520749081", icon: "👑" },
+  { name: "Pet Sim 99", placeId: "8737881037", icon: "🐾" },
+  { name: "Tùy chỉnh", placeId: "", icon: "✏️" }
+];
+
 const PRESET_PLANS = [
   { id: "trial_4h", label: "Dùng thử 4 giờ", plan: "basic", hours: 4, days: null, devices: 1, desc: "Key test nhanh 4 tiếng" },
   { id: "trial_1d", label: "1 Ngày (Thử nghiệm)", plan: "basic", days: 1, devices: 1, desc: "Trải nghiệm nhanh" },
   { id: "week_7d", label: "7 Ngày (1 Tuần)", plan: "basic", days: 7, devices: 1, desc: "Gói cơ bản ngắn hạn" },
-  { id: "month_30d", label: "30 Ngày (1 Tháng)", plan: "pro", days: 30, devices: 2, popular: true, desc: "Bán chạy nhất (Pro)" },
-  { id: "lifetime", label: "Vĩnh Viễn (Trọn Đời)", plan: "business", days: 0, devices: 4, desc: "Lifetime không giới hạn" },
-  { id: "custom", label: "Tùy chỉnh số ngày", plan: "pro", days: null, devices: 1, desc: "Nhập ngày theo yêu cầu" }
+  { id: "month_30d", label: "30 Ngày (1 Tháng)", plan: "pro", days: 30, devices: 5, popular: true, desc: "Bán chạy nhất (Pro 5 Tab UG Phone)" },
+  { id: "lifetime", label: "Vĩnh Viễn (Trọn Đời)", plan: "business", days: 0, devices: 5, desc: "Lifetime không giới hạn" },
+  { id: "custom", label: "Tùy chỉnh số ngày", plan: "pro", days: null, devices: 5, desc: "Nhập ngày theo yêu cầu" }
 ];
 
 export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLicenseId = null }) {
@@ -38,6 +51,7 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
   const [copiedMsg, setCopiedMsg] = useState(false);
 
   // Form State
@@ -47,17 +61,30 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
   const [customerNote, setCustomerNote] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("month_30d");
   const [customDays, setCustomDays] = useState(30);
-  const [maxDevices, setMaxDevices] = useState(2);
+  const [maxDevices, setMaxDevices] = useState(5);
   const [planType, setPlanType] = useState("pro");
+  const [selectedGame, setSelectedGame] = useState("107778070777162");
   const [placeId, setPlaceId] = useState("107778070777162");
+  const [antiAfk, setAntiAfk] = useState(false);
+  const [joinLowServer, setJoinLowServer] = useState(true);
+  const [apiUrl, setApiUrl] = useState(() => {
+    return localStorage.getItem("preferred_api_tunnel") || window.location.origin;
+  });
 
   // Result State
   const [createdData, setCreatedData] = useState(null);
 
   useEffect(() => {
+    if (apiUrl) {
+      localStorage.setItem("preferred_api_tunnel", apiUrl.trim());
+    }
+  }, [apiUrl]);
+
+  useEffect(() => {
     if (isOpen) {
       setError(null);
       setCopiedKey(false);
+      setCopiedCmd(false);
       setCopiedMsg(false);
 
       if (initialLicenseId) {
@@ -72,8 +99,9 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
         setCustomerNote("");
         setSelectedPreset("month_30d");
         setCustomDays(30);
-        setMaxDevices(2);
+        setMaxDevices(5);
         setPlanType("pro");
+        setSelectedGame("107778070777162");
         setPlaceId("107778070777162");
       }
     }
@@ -93,6 +121,13 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
       setError(err.message || "Không thể tải mẫu bàn giao");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGameSelect = (g) => {
+    setSelectedGame(g.placeId);
+    if (g.placeId) {
+      setPlaceId(g.placeId);
     }
   };
 
@@ -118,6 +153,8 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
       const days = isCustom ? Number(customDays) : PRESET_PLANS.find((p) => p.id === selectedPreset)?.days;
       const selectedPlanObj = PRESET_PLANS.find((p) => p.id === selectedPreset);
 
+      const cleanApiUrl = apiUrl.trim().replace(/\/$/, "");
+
       const payload = {
         customerName: customerName.trim() || "Khách hàng cá nhân",
         customerContact: customerContact.trim(),
@@ -125,10 +162,14 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
         customerNote: customerNote.trim(),
         plan: isCustom ? planType : selectedPlanObj?.plan || "pro",
         planName: selectedPlanObj?.label || "Gói Pro Tùy Chỉnh",
-        placeId: placeId.trim(),
+        placeId: placeId.trim() || "107778070777162",
         maxDevices: Number(maxDevices) || 1,
         expiresInHours: selectedPlanObj?.hours || null,
-        expiresInDays: selectedPlanObj?.hours ? null : (days === 0 ? null : (days || 30))
+        expiresInDays: selectedPlanObj?.hours ? null : (days === 0 ? null : (days || 30)),
+        antiAfk,
+        joinLowServer,
+        apiUrl: cleanApiUrl,
+        domain: cleanApiUrl
       };
 
       const result = await api.createDirectSaleLicense(payload);
@@ -148,6 +189,9 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
     if (type === "key") {
       setCopiedKey(true);
       setTimeout(() => setCopiedKey(false), 2000);
+    } else if (type === "cmd") {
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2000);
     } else {
       setCopiedMsg(true);
       setTimeout(() => setCopiedMsg(false), 2000);
@@ -157,38 +201,41 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
       <div
-        className="relative w-full max-w-2xl max-h-[90vh] flex flex-col bg-[#0B132B] border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden text-slate-100"
+        className="relative w-full max-w-2xl max-h-[92vh] flex flex-col bg-[#0B132B] border border-slate-700/70 rounded-2xl shadow-2xl overflow-hidden text-slate-100 my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50 bg-slate-900/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50 bg-slate-900/60">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 text-emerald-400 border border-emerald-500/30">
               <Zap className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white tracking-wide">
+              <h3 className="text-lg font-bold text-white tracking-wide flex items-center gap-2">
                 {step === "form" ? "Bán Key Nhanh Cho Khách Cá Nhân" : "Mẫu Bàn Giao Key Cho Khách"}
+                <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-normal">
+                  Đầy đủ lệnh 1 chạm
+                </span>
               </h3>
               <p className="text-xs text-slate-400">
                 {step === "form"
-                  ? "Tạo mã License tức thì & tự động sinh tin nhắn bàn giao"
+                  ? "Tạo mã License tức thì & tự động sinh lệnh All-in-one chạy ngay"
                   : "Sao chép tin nhắn để gửi ngay qua Zalo, Messenger, Telegram"}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
           {error && (
             <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm flex items-center gap-2">
               <span className="font-semibold">Lỗi:</span> {error}
@@ -196,9 +243,9 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
           )}
 
           {step === "form" ? (
-            <form id="direct-sale-form" onSubmit={handleSubmit} className="space-y-5">
+            <form id="direct-sale-form" onSubmit={handleSubmit} className="space-y-4">
               {/* Customer Info Section */}
-              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" /> Thông tin khách hàng
@@ -217,7 +264,7 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                       placeholder="VD: Anh Nam (Zalo), Hùng Pro..."
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700/70 text-white text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
+                      className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700/70 text-white text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
                     />
                   </div>
                   <div>
@@ -229,7 +276,7 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                       placeholder="VD: 0988xxx, fb.com/nam123..."
                       value={customerContact}
                       onChange={(e) => setCustomerContact(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700/70 text-white text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
+                      className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700/70 text-white text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
                     />
                   </div>
                 </div>
@@ -255,23 +302,46 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-                <label className="block text-xs text-slate-300 font-medium">
-                  Place ID game cho lenh all-in-one
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{3,20}"
-                  required
-                  placeholder="VD: 107778070777162"
-                  value={placeId}
-                  onChange={(e) => setPlaceId(e.target.value.replace(/\D/g, ""))}
-                  className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-700/70 text-white text-sm font-mono focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
-                />
-                <p className="text-[11px] text-slate-400">
-                  Lenh giao khach se gan Place ID nay voi license key moi tao.
-                </p>
+              {/* Game / Place ID Selection */}
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                    <Gamepad2 className="w-3.5 h-3.5" /> Chọn Game Roblox / Place ID
+                  </label>
+                  <span className="text-[11px] text-slate-400 font-mono">Place ID: {placeId || "Chưa nhập"}</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {POPULAR_GAMES.map((g) => (
+                    <button
+                      key={g.name}
+                      type="button"
+                      onClick={() => handleGameSelect(g)}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center gap-2 transition ${
+                        selectedGame === g.placeId
+                          ? "bg-cyan-500/20 border-cyan-500 text-cyan-300 ring-1 ring-cyan-500/50"
+                          : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <span className="text-base">{g.icon}</span>
+                      <span className="truncate">{g.name}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="pt-1">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Nhập Place ID tùy chỉnh (VD: 107778070777162)"
+                    value={placeId}
+                    onChange={(e) => {
+                      setPlaceId(e.target.value.replace(/\D/g, ""));
+                      setSelectedGame("");
+                    }}
+                    className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-700/70 text-white text-sm font-mono focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
+                  />
+                </div>
               </div>
 
               {/* Plan Selection */}
@@ -342,21 +412,69 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                     <Monitor className="w-3.5 h-3.5 text-slate-400" /> Giới hạn thiết bị chạy đồng thời:
                   </label>
                   <div className="flex items-center gap-1.5">
-                    {[1, 2, 4, 8].map((num) => (
+                    {[1, 2, 3, 5, 10, 20].map((num) => (
                       <button
                         key={num}
                         type="button"
                         onClick={() => setMaxDevices(num)}
-                        className={`w-8 h-8 rounded-lg text-xs font-bold transition ${
+                        className={`px-2.5 h-8 rounded-lg text-xs font-bold transition ${
                           maxDevices === num
                             ? "bg-cyan-500 text-slate-950"
                             : "bg-slate-950 border border-slate-800 text-slate-300 hover:border-slate-700"
                         }`}
                       >
-                        {num}
+                        {num} {num === 5 ? "(UG)" : "máy"}
                       </button>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              {/* Advanced Flags & Server URL */}
+              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" /> Tùy chọn nâng cao khi chạy
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-lg bg-slate-950 border border-slate-800 cursor-pointer hover:border-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={antiAfk}
+                      onChange={(e) => setAntiAfk(e.target.checked)}
+                      className="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700"
+                    />
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Bật Anti-AFK cảm ứng</div>
+                      <div className="text-[11px] text-slate-400">Tắt (khuyên dùng) khi chạy nhiều tab UG Phone</div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-lg bg-slate-950 border border-slate-800 cursor-pointer hover:border-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={joinLowServer}
+                      onChange={(e) => setJoinLowServer(e.target.checked)}
+                      className="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700"
+                    />
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Tìm phòng ít người (Low Server)</div>
+                      <div className="text-[11px] text-slate-400">Tự động chọn server 0 - 2 người chơi</div>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Globe className="w-3 h-3 text-cyan-400" /> Địa chỉ Server API / Cloudflare Tunnel:
+                  </label>
+                  <input
+                    type="text"
+                    value={apiUrl}
+                    onChange={(e) => setApiUrl(e.target.value)}
+                    placeholder="https://your-tunnel.trycloudflare.com hoặc http://ip:3000"
+                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                  />
                 </div>
               </div>
 
@@ -389,13 +507,13 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                   </div>
 
                   <div className="flex items-center justify-between bg-slate-950/80 p-3 rounded-lg border border-slate-800">
-                    <code className="text-base font-mono font-bold text-emerald-400 tracking-wider">
+                    <code className="text-base font-mono font-bold text-emerald-400 tracking-wider break-all select-all">
                       {createdData.rawKey}
                     </code>
                     <button
                       type="button"
                       onClick={() => copyToClipboard(createdData.rawKey, "key")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-semibold transition"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-semibold transition shrink-0 ml-2"
                     >
                       {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                       {copiedKey ? "Đã chép Key" : "Chép Key"}
@@ -405,21 +523,21 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
               )}
 
               {createdData?.allInOneCommand && (
-                <div className="p-3.5 rounded-xl bg-slate-950/90 border border-emerald-500/30 space-y-2">
+                <div className="p-3.5 rounded-xl bg-slate-950/90 border border-emerald-500/30 space-y-2 shadow-lg">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold tracking-wider uppercase text-emerald-400">
-                      Lenh all-in-one gom Place ID + Key
+                    <span className="text-[11px] font-bold tracking-wider uppercase text-emerald-400 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5" /> Lệnh Setup 1 Dòng (Chạy ngay trên UG Phone / Termux)
                     </span>
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(createdData.allInOneCommand, "msg")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-xs font-semibold transition"
+                      onClick={() => copyToClipboard(createdData.allInOneCommand, "cmd")}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500 text-slate-950 hover:bg-emerald-400 text-xs font-bold transition shrink-0"
                     >
-                      {copiedMsg ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      {copiedMsg ? "Da copy" : "Copy lenh"}
+                      {copiedCmd ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedCmd ? "Đã chép lệnh" : "Sao chép lệnh"}
                     </button>
                   </div>
-                  <code className="block p-3 rounded-lg bg-black/80 border border-slate-800 text-[11px] text-emerald-300 font-mono break-all select-all">
+                  <code className="block p-3 rounded-lg bg-black/80 border border-slate-800 text-[11px] text-emerald-300 font-mono break-all select-all leading-relaxed">
                     {createdData.allInOneCommand}
                   </code>
                 </div>
@@ -434,7 +552,7 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                   <button
                     type="button"
                     onClick={() => copyToClipboard(createdData?.handoverTemplate, "msg")}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1"
+                    className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1"
                   >
                     {copiedMsg ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     {copiedMsg ? "Đã sao chép toàn bộ" : "Sao chép tất cả"}
@@ -442,7 +560,7 @@ export default function DirectSaleModal({ isOpen, onClose, onSuccess, initialLic
                 </div>
                 <textarea
                   readOnly
-                  rows={11}
+                  rows={9}
                   value={createdData?.handoverTemplate || ""}
                   className="w-full p-3.5 rounded-xl bg-slate-950 border border-slate-700/80 font-mono text-xs text-slate-200 focus:outline-none leading-relaxed select-all"
                 />

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Terminal, Lock, User, AlertTriangle, ArrowRight } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 
-export function LoginPage() {
+export function LoginPage({ onBackToStore }) {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

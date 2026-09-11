@@ -135,7 +135,11 @@ export class AdminController {
 
   createLicense = async (req, res, next) => {
     try {
-      const result = await this.service.createLicense(req.body, {
+      const domain = req.body.apiUrl || req.body.domain || `${req.protocol}://${req.get("host")}`;
+      const result = await this.service.createLicense({
+        ...req.body,
+        domain
+      }, {
         adminId: req.admin.id,
         ip: req.ip || req.socket?.remoteAddress
       });
@@ -154,7 +158,7 @@ export class AdminController {
 
   createDirectSale = async (req, res, next) => {
     try {
-      const domain = `${req.protocol}://${req.get("host")}`;
+      const domain = req.body.apiUrl || req.body.domain || `${req.protocol}://${req.get("host")}`;
       const result = await this.service.createDirectSaleLicense({
         ...req.body,
         domain

@@ -84,10 +84,14 @@ function formatExpiryText({ expiresAt, expiresInHours, expiresInDays }) {
   return expiresAt.toLocaleString("vi-VN");
 }
 
-function buildAllInOneCommand({ domain, placeId, rawKey }) {
+function buildAllInOneCommand({ domain, placeId, rawKey, antiAfk = false, joinLowServer = true, minPlayers = 0, maxPlayers = 2 }) {
   const apiBase = String(domain || "http://localhost:3000").replace(/\/$/, "");
   const targetPlaceId = String(placeId || "107778070777162").trim();
-  return `cd ~; rm -rf auto-rejoin; mkdir -p auto-rejoin; cd auto-rejoin; curl -fSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh; AUTO_REJOIN_LICENSE_API="${apiBase}" AUTO_REJOIN_LICENSE_MODE=required LICENSE_KEY="${rawKey}" JOIN_LOW_SERVER=true LOW_SERVER_MIN_PLAYERS=0 LOW_SERVER_MAX_PLAYERS=2 LOW_SERVER_STRICT=true bash setup.sh ${targetPlaceId}`;
+  const antiAfkParam = antiAfk ? "ANTI_AFK=true " : "ANTI_AFK=false ";
+  const lowServerParam = joinLowServer !== false
+    ? `JOIN_LOW_SERVER=true LOW_SERVER_MIN_PLAYERS=${minPlayers ?? 0} LOW_SERVER_MAX_PLAYERS=${maxPlayers ?? 2} LOW_SERVER_STRICT=true `
+    : "JOIN_LOW_SERVER=false ";
+  return `cd ~; rm -rf auto-rejoin; mkdir -p auto-rejoin; cd auto-rejoin; curl -fSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh; AUTO_REJOIN_LICENSE_API="${apiBase}" AUTO_REJOIN_LICENSE_MODE=required LICENSE_KEY="${rawKey}" ${antiAfkParam}${lowServerParam}bash setup.sh ${targetPlaceId}`;
 }
 
 export class AdminService {
@@ -354,6 +358,41 @@ export class AdminService {
     });
 
     const entitlements = PLAN_ENTITLEMENTS[plan];
+    const placeId = String(data.placeId || "107778070777162").trim();
+    const domain = data.domain || data.apiUrl || "http://localhost:3000";
+    const antiAfk = data.antiAfk === true;
+    const joinLowServer = data.joinLowServer !== false;
+    const allInOneCommand = buildAllInOneCommand({
+      domain,
+      placeId,
+      rawKey,
+      antiAfk,
+      joinLowServer,
+      minPlayers: data.minPlayers,
+      maxPlayers: data.maxPlayers
+    });
+
+    const expiryText = formatExpiryText(expiry);
+    const planName = data.planName || (plan === "business" ? "Trọn Đời (Lifetime)" : plan === "pro" ? "Gói Pro (Cao Cấp)" : "Gói Basic (Cơ Bản)");
+
+    const handoverText = 
+`🎁 BÀN GIAO LICENSE KEY - AUTO REJOIN PRO
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 Khách hàng: ${data.customerName || "Khách hàng"}
+🔑 License Key: ${rawKey}
+📦 Gói cước: ${planName}
+📱 Giới hạn thiết bị: ${maxDevices} máy chạy cùng lúc
+⏳ Thời hạn sử dụng: ${expiryText}
+🎮 Place ID: ${placeId}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 CỔNG TỰ PHỤC VỤ & TRA CỨU / ĐỔI MÁY:
+👉 ${domain}/portal
+(Nhập mã Key để xem hạn dùng và tự bấm gỡ/đổi máy 24/7)
+
+💻 LỆNH ALL-IN-ONE ANDROID / TERMUX:
+${allInOneCommand}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+💬 Cảm ơn bạn đã tin dùng Auto Rejoin Pro! Chúc bạn farm game hiệu quả.`;
 
     return {
       license: {
@@ -368,7 +407,9 @@ export class AdminService {
         features: entitlements.features,
         expiresAt: expiresAt ? expiresAt.toISOString() : null
       },
-      licenseKey: rawKey
+      licenseKey: rawKey,
+      allInOneCommand,
+      handoverTemplate: handoverText
     };
   }
 
@@ -378,8 +419,10 @@ export class AdminService {
     const customerContact = String(data.customerContact || "").trim();
     const salesChannel = String(data.salesChannel || "direct").trim();
     const customerNote = String(data.customerNote || "").trim();
-    const domain = data.domain || "http://localhost:5173";
+    const domain = data.domain || data.apiUrl || "http://localhost:5173";
     const placeId = String(data.placeId || "107778070777162").trim();
+    const antiAfk = data.antiAfk === true;
+    const joinLowServer = data.joinLowServer !== false;
 
     let maxDevices = Number(data.maxDevices) || 1;
     const expiry = resolveLicenseExpiry({
@@ -440,7 +483,15 @@ export class AdminService {
     const expiryText = formatExpiryText(expiry);
 
     const planName = data.planName || (plan === "business" ? "Trọn Đời (Lifetime)" : plan === "pro" ? "Gói Pro (Cao Cấp)" : "Gói Basic (Cơ Bản)");
-    const allInOneCommand = buildAllInOneCommand({ domain, placeId, rawKey });
+    const allInOneCommand = buildAllInOneCommand({
+      domain,
+      placeId,
+      rawKey,
+      antiAfk,
+      joinLowServer,
+      minPlayers: data.minPlayers,
+      maxPlayers: data.maxPlayers
+    });
 
     const handoverText = 
 `🎁 BÀN GIAO LICENSE KEY - AUTO REJOIN PRO
