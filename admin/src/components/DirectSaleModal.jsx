@@ -25,7 +25,7 @@ const CHANNEL_OPTIONS = [
 ];
 
 const PRESET_PLANS = [
-  { id: "trial_4h", label: "Trial 4 gio", plan: "basic", hours: 4, days: null, devices: 1, desc: "Key test nhanh 4 tieng" },
+  { id: "trial_4h", label: "Dùng thử 4 giờ", plan: "basic", hours: 4, days: null, devices: 1, desc: "Key test nhanh 4 tiếng" },
   { id: "trial_1d", label: "1 Ngày (Thử nghiệm)", plan: "basic", days: 1, devices: 1, desc: "Trải nghiệm nhanh" },
   { id: "week_7d", label: "7 Ngày (1 Tuần)", plan: "basic", days: 7, devices: 1, desc: "Gói cơ bản ngắn hạn" },
   { id: "month_30d", label: "30 Ngày (1 Tháng)", plan: "pro", days: 30, devices: 2, popular: true, desc: "Bán chạy nhất (Pro)" },

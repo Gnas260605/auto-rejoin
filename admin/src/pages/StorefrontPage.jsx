@@ -21,59 +21,83 @@ import { QuickStartCard } from "../components/QuickStartCard.jsx";
 const STANDARD_PLANS = [
   {
     id: "day",
-    name: "1 Ngay",
-    badge: "Trial",
-    duration: "24 gio",
+    name: "1 Ngày",
+    badge: "Dùng Thử",
+    duration: "24 giờ",
     priceFormatted: "10,000",
     priceNumber: 10000,
     plan: "basic",
     maxDevices: 1,
     enabled: true,
     highlight: false,
-    description: "Danh cho nhu cau test nhanh hoac chay ngan han.",
-    features: ["1 may active", "1 clone chay cung luc", "Auto join server it nguoi", "Anti-AFK co ban", "Auto rejoin khi crash/kick"]
+    description: "Dành cho nhu cầu trải nghiệm nhanh hoặc chạy ngắn hạn.",
+    features: [
+      "1 máy kích hoạt",
+      "1 clone chạy cùng lúc",
+      "Tự động vào server ít người",
+      "Anti-AFK chống kick cơ bản",
+      "Tự động kết nối lại khi crash/kick"
+    ]
   },
   {
     id: "week",
-    name: "7 Ngay",
-    badge: "Weekly",
-    duration: "7 ngay",
+    name: "7 Ngày",
+    badge: "Theo Tuần",
+    duration: "7 ngày",
     priceFormatted: "40,000",
     priceNumber: 40000,
     plan: "standard",
     maxDevices: 1,
     enabled: true,
     highlight: false,
-    description: "Goi tiet kiem tuan cho treo farm va canh bao co ban.",
-    features: ["1 may active", "Toi da 5 clone", "Auto join server it nguoi", "Canh bao Discord", "Ho tro profile cau hinh"]
+    description: "Gói tiết kiệm tuần cho nhu cầu treo farm và cảnh báo cơ bản.",
+    features: [
+      "1 máy kích hoạt",
+      "Tối đa 5 clone chạy cùng lúc",
+      "Tự động vào server ít người",
+      "Cảnh báo thông báo qua Discord",
+      "Hỗ trợ lưu cấu hình theo profile"
+    ]
   },
   {
     id: "month",
-    name: "30 Ngay",
-    badge: "Pho bien",
-    duration: "30 ngay",
+    name: "30 Ngày",
+    badge: "Phổ biến",
+    duration: "30 ngày",
     priceFormatted: "100,000",
     priceNumber: 100000,
     plan: "pro",
     maxDevices: 2,
     enabled: true,
     highlight: true,
-    description: "Goi tieu chuan cho nhieu tai khoan va thiet bi chay song song.",
-    features: ["2 may active cung luc", "Toi da 20 clone", "Auto join server it nguoi", "Canh bao Discord va profile", "Ho tro installer Roblox"]
+    description: "Gói tiêu chuẩn cho nhiều tài khoản và thiết bị chạy song song.",
+    features: [
+      "2 máy kích hoạt cùng lúc",
+      "Tối đa 20 clone chạy cùng lúc",
+      "Tự động vào server ít người",
+      "Cảnh báo Discord & Profile cấu hình",
+      "Hỗ trợ bộ cài Roblox tự động"
+    ]
   },
   {
     id: "lifetime",
-    name: "Tron Doi",
-    badge: "Lifetime",
-    duration: "Vinh vien",
+    name: "Trọn Đời",
+    badge: "Vĩnh Viễn",
+    duration: "Vĩnh viễn",
     priceFormatted: "250,000",
     priceNumber: 250000,
     plan: "business",
     maxDevices: 4,
     enabled: true,
     highlight: false,
-    description: "Mua mot lan, dung dai han va mo khoa tinh nang nang cao.",
-    features: ["4 may active cung luc", "Toi da 100 clone", "Full tinh nang goi Pro", "Freeform da cua so", "Ho tro uu tien 1-1"]
+    description: "Mua một lần, sử dụng dài hạn và mở khóa toàn bộ tính năng cao cấp.",
+    features: [
+      "4 máy kích hoạt cùng lúc",
+      "Tối đa 100 clone chạy cùng lúc",
+      "Đầy đủ tính năng gói Pro",
+      "Mở khóa đa cửa sổ Freeform",
+      "Hỗ trợ kỹ thuật ưu tiên 1-1"
+    ]
   }
 ];
 
@@ -287,11 +311,6 @@ export function StorefrontPage({ onNavigateToPortal, onNavigateToAdmin }) {
                         : "border border-slate-800/80 bg-[#0B1322]/80"
                     }`}
                   >
-                    {/* Top highlight bar for featured */}
-                    {isFeatured && (
-                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 rounded-t-2xl" />
-                    )}
-
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-base font-bold text-white tracking-tight">{plan.name}</span>
@@ -416,15 +435,10 @@ export function StorefrontPage({ onNavigateToPortal, onNavigateToAdmin }) {
                   key={plan.id}
                   className={`rounded-2xl p-4 sm:p-5 flex flex-col justify-between transition-all duration-300 relative group select-none ${
                     isFeatured
-                      ? "border-2 border-emerald-500/80 bg-gradient-to-b from-[#0F1E33] to-[#0A1322] shadow-[0_0_30px_-5px_rgba(16,185,129,0.28)]"
+                      ? "border-2 border-emerald-400 bg-gradient-to-b from-[#0F1E33] to-[#0A1322] shadow-[0_0_30px_-5px_rgba(16,185,129,0.32)] ring-1 ring-emerald-400/20"
                       : "border border-slate-800/90 bg-[#0B1322]/85 hover:bg-[#0D172A] hover:border-slate-700 hover:shadow-xl"
                   }`}
                 >
-                  {/* Top highlight bar for featured */}
-                  {isFeatured && (
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 rounded-t-2xl" />
-                  )}
-
                   <div>
                     <div className="flex items-center justify-between mb-2.5">
                       <span className="text-base font-bold text-white tracking-tight">{plan.name}</span>
