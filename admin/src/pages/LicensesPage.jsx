@@ -15,7 +15,12 @@ import {
   Filter,
   Zap,
   FileText,
-  UserCheck
+  UserCheck,
+  Copy,
+  Check,
+  Smartphone,
+  ShieldCheck,
+  Sparkles
 } from "lucide-react";
 import { api } from "../api/client.js";
 import { StatusBadge } from "../components/StatusBadge.jsx";
@@ -39,6 +44,9 @@ export function LicensesPage({ onSelectLicense }) {
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
 
+  // Copied states
+  const [copiedId, setCopiedId] = useState(null);
+
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [directSaleModalOpen, setDirectSaleModalOpen] = useState(false);
@@ -47,7 +55,7 @@ export function LicensesPage({ onSelectLicense }) {
     isOpen: false,
     title: "",
     message: "",
-    confirmText: "Confirm",
+    confirmText: "Xác nhận",
     variant: "danger",
     action: null
   });
@@ -82,7 +90,7 @@ export function LicensesPage({ onSelectLicense }) {
         setPlans(plansRes.plans || []);
       }
     } catch (err) {
-      setError(err.message || "Failed to load licenses");
+      setError(err.message || "Không thể tải danh sách License");
     } finally {
       setLoading(false);
     }
@@ -92,13 +100,19 @@ export function LicensesPage({ onSelectLicense }) {
     loadData();
   }, [loadData]);
 
+  const handleCopyKey = (keyText, id) => {
+    navigator.clipboard.writeText(keyText);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   // Action handlers with confirmation
   const handleSuspend = (license) => {
     setConfirmModal({
       isOpen: true,
-      title: "Suspend License?",
-      message: `Are you sure you want to suspend license ${license.prefix}...${license.last4}? Connected clients will receive a SUSPENDED error on their next confirmation cycle.`,
-      confirmText: "Suspend License",
+      title: "Tạm ngưng License?",
+      message: `Bạn có chắc muốn tạm ngưng license ${license.prefix}...${license.last4}? Các thiết bị đang cắm tool sẽ bị tạm dừng trong lần kiểm tra tiếp theo.`,
+      confirmText: "Tạm ngưng",
       variant: "warning",
       action: async () => {
         await api.suspendLicense(license.id);
@@ -110,9 +124,9 @@ export function LicensesPage({ onSelectLicense }) {
   const handleReactivate = (license) => {
     setConfirmModal({
       isOpen: true,
-      title: "Reactivate License?",
-      message: `Reactivate license ${license.prefix}...${license.last4}? Connected clients will be able to validate successfully again.`,
-      confirmText: "Reactivate",
+      title: "Kích hoạt lại License?",
+      message: `Mở khóa và cho phép license ${license.prefix}...${license.last4} hoạt động trở lại?`,
+      confirmText: "Kích hoạt lại",
       variant: "success",
       action: async () => {
         await api.reactivateLicense(license.id);
@@ -124,9 +138,9 @@ export function LicensesPage({ onSelectLicense }) {
   const handleRevoke = (license) => {
     setConfirmModal({
       isOpen: true,
-      title: "Revoke License Permanently?",
-      message: `Warning: Revoking license ${license.prefix}...${license.last4} is irreversible. All issued device tokens will be revoked immediately and existing clients will fail validation.`,
-      confirmText: "Revoke Permanently",
+      title: "Thu hồi vĩnh viễn License?",
+      message: `Cảnh báo: Hành động này KHÔNG THỂ HOÀN TÁC. License ${license.prefix}...${license.last4} và toàn bộ thiết bị đang kết nối sẽ bị hủy bỏ ngay lập tức.`,
+      confirmText: "Thu hồi vĩnh viễn",
       variant: "danger",
       action: async () => {
         await api.revokeLicense(license.id);
@@ -143,39 +157,46 @@ export function LicensesPage({ onSelectLicense }) {
       setExtendModal({ isOpen: false, license: null, days: 30 });
       loadData();
     } catch (err) {
-      alert(`Extend failed: ${err.message}`);
+      alert(`Gia hạn thất bại: ${err.message}`);
     }
   };
 
   const formatDate = (isoString) => {
-    if (!isoString) return "Lifetime";
+    if (!isoString) return "Vĩnh viễn";
     const d = new Date(isoString);
-    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return d.toLocaleDateString("vi-VN", { year: "numeric", month: "2-digit", day: "2-digit" });
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-5 animate-fadeIn">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-3xl border border-slate-800 backdrop-blur-md">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100 tracking-tight">License Management</h2>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Quản lý, cấp phát và thu hồi key bản quyền Auto Rejoin Pro
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+              Quản Lý Bản Quyền & Key
+            </h2>
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              Live Realtime
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Cấp phát nhanh, theo dõi thiết bị online, thu hồi & xuất lệnh cài đặt 1 chạm
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => setDirectSaleModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold rounded-lg text-xs shadow-lg shadow-emerald-500/20 transition"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-500/20 transition-all hover:scale-[1.02]"
           >
-            <Zap className="w-3.5 h-3.5 fill-current" />
+            <Zap className="w-4 h-4 fill-slate-950" />
             <span>Bán Key Nhanh (Giao Khách)</span>
           </button>
           <button
             onClick={() => setCreateModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold rounded-lg text-xs transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs border border-slate-700 transition-all"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4 text-emerald-400" />
             <span>Tạo Key Tùy Biến</span>
           </button>
         </div>
@@ -184,16 +205,17 @@ export function LicensesPage({ onSelectLicense }) {
       {/* Metrics Header */}
       <StatsCards
         stats={stats}
+        activeFilter={statusFilter}
         onFilterChange={(f) => {
           setStatusFilter(f === "expiring" ? "" : f);
           setPage(1);
         }}
       />
 
-      {/* Controls / Filter Bar */}
-      <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 flex flex-col md:flex-row items-center gap-2.5">
+      {/* Filter / Search Bar */}
+      <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col md:flex-row items-center gap-3 backdrop-blur-md">
         <div className="relative flex-1 w-full">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
             type="text"
             value={search}
@@ -201,8 +223,8 @@ export function LicensesPage({ onSelectLicense }) {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Tìm theo key, tên khách hàng, số điện thoại, ghi chú..."
-            className="w-full pl-9 pr-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-200 placeholder-zinc-600 text-xs focus:outline-none focus:border-zinc-700"
+            placeholder="Tìm theo Key, Tên khách hàng, Số điện thoại, Ghi chú..."
+            className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 text-xs focus:outline-none focus:border-emerald-500 transition"
           />
         </div>
 
@@ -213,13 +235,13 @@ export function LicensesPage({ onSelectLicense }) {
               setStatusFilter(e.target.value);
               setPage(1);
             }}
-            className="px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-300 text-xs focus:outline-none focus:border-zinc-700 capitalize"
+            className="px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-emerald-500"
           >
             <option value="">Tất cả trạng thái</option>
-            <option value="active">Active</option>
-            <option value="suspended">Suspended</option>
-            <option value="revoked">Revoked</option>
-            <option value="expired">Expired</option>
+            <option value="active">Đang hoạt động (Active)</option>
+            <option value="suspended">Tạm ngưng (Suspended)</option>
+            <option value="revoked">Đã thu hồi (Revoked)</option>
+            <option value="expired">Đã hết hạn (Expired)</option>
           </select>
 
           <select
@@ -228,180 +250,212 @@ export function LicensesPage({ onSelectLicense }) {
               setPlanFilter(e.target.value);
               setPage(1);
             }}
-            className="px-2.5 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-300 text-xs focus:outline-none focus:border-zinc-700 capitalize"
+            className="px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-emerald-500 uppercase"
           >
             <option value="">Tất cả gói</option>
             {plans.map((p) => (
               <option key={p.plan} value={p.plan}>
-                {p.plan}
+                {p.plan.toUpperCase()}
               </option>
             ))}
           </select>
 
           <button
             onClick={loadData}
-            title="Tải lại"
-            className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-md transition-colors shrink-0"
+            title="Tải lại dữ liệu"
+            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-colors shrink-0"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-emerald-400" : ""}`} />
           </button>
         </div>
       </div>
 
       {/* Table Section */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden backdrop-blur-md shadow-xl">
         {error ? (
-          <div className="p-6 text-center text-rose-400 text-xs flex items-center justify-center gap-2">
-            <AlertTriangle className="w-4 h-4" />
+          <div className="p-8 text-center text-rose-400 text-xs flex items-center justify-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
             <span>{error}</span>
           </div>
         ) : licenses.length === 0 && !loading ? (
-          <div className="p-10 text-center text-zinc-500">
-            <Key className="w-8 h-8 mx-auto mb-2 text-zinc-600 opacity-60" />
-            <p className="text-sm font-medium text-zinc-400">Không tìm thấy license nào</p>
-            <p className="text-xs text-zinc-500 mt-0.5">Thử điều chỉnh bộ lọc hoặc bấm "Bán Key Nhanh".</p>
+          <div className="p-12 text-center text-slate-400">
+            <Key className="w-10 h-10 mx-auto mb-3 text-slate-600 opacity-60" />
+            <p className="text-base font-semibold text-slate-200">Không tìm thấy license nào</p>
+            <p className="text-xs text-slate-400 mt-1">Thử điều chỉnh bộ lọc tìm kiếm hoặc tạo một license mới.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-zinc-300">
-              <thead className="bg-zinc-950/80 border-b border-zinc-800 text-[11px] uppercase tracking-wider text-zinc-400">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950/80 border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400">
                 <tr>
-                  <th className="py-3 px-4 font-semibold">License Key / Khách hàng</th>
-                  <th className="py-3 px-4 font-semibold">Gói cước</th>
-                  <th className="py-3 px-4 font-semibold">Trạng thái</th>
-                  <th className="py-3 px-4 font-semibold">Thiết bị</th>
-                  <th className="py-3 px-4 font-semibold">Hết hạn</th>
-                  <th className="py-3 px-4 font-semibold">Ngày tạo</th>
-                  <th className="py-3 px-4 font-semibold text-right">Thao tác</th>
+                  <th className="py-3.5 px-4 font-bold">Mã License / Khách hàng</th>
+                  <th className="py-3.5 px-4 font-bold">Gói cước</th>
+                  <th className="py-3.5 px-4 font-bold">Trạng thái</th>
+                  <th className="py-3.5 px-4 font-bold">Tải thiết bị (Slots)</th>
+                  <th className="py-3.5 px-4 font-bold">Thời hạn</th>
+                  <th className="py-3.5 px-4 font-bold">Ngày tạo</th>
+                  <th className="py-3.5 px-4 font-bold text-right">Thao tác</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
-                {licenses.map((lic) => (
-                  <tr key={lic.id} className="hover:bg-zinc-800/30 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                          {lic.displayKey}
+              <tbody className="divide-y divide-slate-800/60">
+                {licenses.map((lic) => {
+                  const usagePercent = Math.min(100, Math.round(((lic.activeDeviceCount || 0) / (lic.maxDevices || 1)) * 100));
+                  const isFull = (lic.activeDeviceCount || 0) >= (lic.maxDevices || 1);
+
+                  return (
+                    <tr key={lic.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/25 tracking-wide">
+                            {lic.displayKey}
+                          </span>
+                          <button
+                            type="button"
+                            title="Sao chép mã Key"
+                            onClick={() => handleCopyKey(lic.prefix + "..." + lic.last4, lic.id)}
+                            className="p-1 text-slate-400 hover:text-emerald-400 transition"
+                          >
+                            {copiedId === lic.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                          <span className="text-[10px] text-slate-500 font-mono">#{lic.id}</span>
+                        </div>
+
+                        {lic.customerName && (
+                          <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-300">
+                            <span className="font-semibold text-cyan-300">👤 {lic.customerName}</span>
+                            {lic.customerContact && (
+                              <span className="text-[10px] text-slate-400">({lic.customerContact})</span>
+                            )}
+                            {lic.salesChannel && (
+                              <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-cyan-950 text-cyan-300 border border-cyan-800/60">
+                                {lic.salesChannel}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-800 text-slate-200 border border-slate-700">
+                          {lic.plan}
                         </span>
-                        <span className="text-[10px] text-zinc-500 font-mono">#{lic.id}</span>
-                      </div>
-                      {lic.customerName && (
-                        <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-300">
-                          <span className="font-semibold text-cyan-300">👤 {lic.customerName}</span>
-                          {lic.customerContact && (
-                            <span className="text-[10px] text-slate-400">({lic.customerContact})</span>
-                          )}
-                          {lic.salesChannel && (
-                            <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
-                              {lic.salesChannel}
-                            </span>
+                        <span className="text-[10px] text-slate-400 block mt-1">
+                          {lic.maxInstances} instance clone
+                        </span>
+                      </td>
+
+                      <td className="py-3.5 px-4">
+                        <StatusBadge status={lic.status} />
+                      </td>
+
+                      <td className="py-3.5 px-4 min-w-[130px]">
+                        <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                          <span className={isFull ? "text-rose-400" : "text-slate-200"}>
+                            {lic.activeDeviceCount} / {lic.maxDevices} máy
+                          </span>
+                          <span className="text-[10px] text-slate-400">{usagePercent}%</span>
+                        </div>
+                        {/* Progress Bar */}
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              isFull ? "bg-rose-500" : usagePercent >= 70 ? "bg-amber-400" : "bg-emerald-400"
+                            }`}
+                            style={{ width: `${usagePercent}%` }}
+                          />
+                        </div>
+                      </td>
+
+                      <td className="py-3.5 px-4 text-xs font-medium text-slate-300">
+                        {formatDate(lic.expiresAt)}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-xs text-slate-400 font-mono">
+                        {formatDate(lic.createdAt)}
+                      </td>
+
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setHandoverModalLicenseId(lic.id)}
+                            title="Lấy mẫu bàn giao gửi khách"
+                            className="p-1.5 text-cyan-400 hover:text-cyan-200 hover:bg-cyan-500/15 rounded-lg transition"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => onSelectLicense(lic.id)}
+                            title="Xem chi tiết thiết bị"
+                            className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setExtendModal({ isOpen: true, license: lic, days: 30 })}
+                            title="Gia hạn thời hạn"
+                            className="p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 rounded-lg transition"
+                          >
+                            <Calendar className="w-4 h-4" />
+                          </button>
+                          {lic.status === "active" ? (
+                            <button
+                              onClick={() => handleSuspend(lic)}
+                              title="Tạm ngưng"
+                              className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-500/15 rounded-lg transition"
+                            >
+                              <Pause className="w-4 h-4" />
+                            </button>
+                          ) : lic.status === "suspended" ? (
+                            <button
+                              onClick={() => handleReactivate(lic)}
+                              title="Kích hoạt lại"
+                              className="p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 rounded-lg transition"
+                            >
+                              <Play className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                          {lic.status !== "revoked" && (
+                            <button
+                              onClick={() => handleRevoke(lic)}
+                              title="Thu hồi vĩnh viễn"
+                              className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 rounded-lg transition"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
                           )}
                         </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-zinc-800 text-zinc-200 border border-zinc-700">
-                        {lic.plan}
-                      </span>
-                      <span className="text-[10px] text-zinc-500 block mt-0.5">
-                        {lic.maxInstances} clone
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <StatusBadge status={lic.status} />
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="font-medium text-zinc-200">
-                        {lic.activeDeviceCount} / {lic.maxDevices}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-xs text-zinc-400">
-                      {formatDate(lic.expiresAt)}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-zinc-500">
-                      {formatDate(lic.createdAt)}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setHandoverModalLicenseId(lic.id)}
-                          title="Lấy mẫu bàn giao gửi khách"
-                          className="p-1.5 text-cyan-400 hover:text-cyan-200 hover:bg-cyan-500/10 rounded transition-colors"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => onSelectLicense(lic.id)}
-                          title="Chi tiết thiết bị"
-                          className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setExtendModal({ isOpen: true, license: lic, days: 30 })}
-                          title="Gia hạn"
-                          className="p-1.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded transition-colors"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                        </button>
-                        {lic.status === "active" ? (
-                          <button
-                            onClick={() => handleSuspend(lic)}
-                            title="Tạm ngưng"
-                            className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 rounded transition-colors"
-                          >
-                            <Pause className="w-3.5 h-3.5" />
-                          </button>
-                        ) : lic.status === "suspended" ? (
-                          <button
-                            onClick={() => handleReactivate(lic)}
-                            title="Kích hoạt lại"
-                            className="p-1.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded transition-colors"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                          </button>
-                        ) : null}
-                        {lic.status !== "revoked" && (
-                          <button
-                            onClick={() => handleRevoke(lic)}
-                            title="Thu hồi vĩnh viễn"
-                            className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 rounded transition-colors"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
         {/* Pagination Bar */}
-        <div className="px-4 py-3 bg-zinc-950/60 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
+        <div className="px-5 py-3.5 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <div>
-            Hiển thị <span className="font-semibold text-zinc-200">{licenses.length}</span> trên{" "}
-            <span className="font-semibold text-zinc-200">{totalItems}</span> license
+            Hiển thị <span className="font-bold text-slate-200">{licenses.length}</span> trên{" "}
+            <span className="font-bold text-slate-200">{totalItems}</span> license
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="p-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-800 transition-colors"
+              className="p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 transition"
             >
-              <ChevronLeft className="w-3.5 h-3.5" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
-            <span>
-              Trang <span className="font-semibold text-zinc-200">{page}</span> / {totalPages}
+            <span className="px-2">
+              Trang <span className="font-bold text-emerald-400">{page}</span> / {totalPages}
             </span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="p-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-800 transition-colors"
+              className="p-1.5 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800 transition"
             >
-              <ChevronRight className="w-3.5 h-3.5" />
+              <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -444,15 +498,15 @@ export function LicensesPage({ onSelectLicense }) {
 
       {/* Extend Modal */}
       {extendModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
-          <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-lg p-5">
-            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Gia Hạn Thời Gian License</h3>
-            <p className="text-xs text-zinc-400 mb-3">
-              Gia hạn cho license {extendModal.license?.prefix}...{extendModal.license?.last4}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="relative w-full max-w-sm bg-slate-900 border border-slate-700/80 rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-1">Gia Hạn Thời Gian License</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Gia hạn cho license <code className="text-emerald-400 font-mono font-bold">{extendModal.license?.prefix}...{extendModal.license?.last4}</code>
             </p>
-            <form onSubmit={handleExtendSubmit} className="space-y-3">
+            <form onSubmit={handleExtendSubmit} className="space-y-4">
               <div>
-                <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Số ngày gia hạn thêm
                 </label>
                 <input
@@ -461,21 +515,21 @@ export function LicensesPage({ onSelectLicense }) {
                   max="3650"
                   value={extendModal.days}
                   onChange={(e) => setExtendModal({ ...extendModal, days: e.target.value })}
-                  className="w-full px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md text-zinc-100 text-xs focus:outline-none focus:border-zinc-700"
+                  className="w-full px-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
                   required
                 />
               </div>
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-800">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setExtendModal({ isOpen: false, license: null, days: 30 })}
-                  className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-md"
+                  className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 bg-slate-800 rounded-xl"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="px-3 py-1.5 text-xs font-semibold text-zinc-950 bg-emerald-500 hover:bg-emerald-400 rounded-md transition-colors"
+                  className="px-4 py-2 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition shadow-lg shadow-emerald-500/20"
                 >
                   Xác nhận gia hạn
                 </button>
