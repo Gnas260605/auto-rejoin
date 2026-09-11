@@ -643,7 +643,7 @@ is_roblox_running() {
     return 1
 }
 
-# ── Kiểm tra xem Roblox đã vào gameplay map chưa (GameActivity) ──
+# ── Kiểm tra xem Roblox đã vào gameplay map chưa (GameActivity / MainActivity) ──
 is_in_game() {
     local pkg="$ROBLOX_PACKAGE"
 
@@ -659,24 +659,32 @@ is_in_game() {
     fi
 
     if [ "$use_shared" = "true" ]; then
-        grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qi "GameActivity" && return 0
+        grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
         if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
-            grep -i "$pkg" "${TMP_DIR}/roblox_windows.txt" | grep -qi "GameActivity" && return 0
+            grep -i "$pkg" "${TMP_DIR}/roblox_windows.txt" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
         fi
-        return 1
     fi
 
-    # 2. Phương thức trực tiếp
+    # 2. Phương thức trực tiếp qua dumpsys nếu khả dụng
     local act_out
     act_out=$(android_dumpsys activity activities 2>/dev/null)
     if [ -n "$act_out" ]; then
-        echo "$act_out" | grep -i "$pkg" | grep -qi "GameActivity" && return 0
+        echo "$act_out" | grep -i "$pkg" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
     fi
 
     local win_out
     win_out=$(android_dumpsys window windows 2>/dev/null)
     if [ -n "$win_out" ]; then
-        echo "$win_out" | grep -i "$pkg" | grep -qi "GameActivity" && return 0
+        echo "$win_out" | grep -i "$pkg" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
+    fi
+
+    # 3. Fallback cho chế độ direct / mod APK (khi dumpsys không có quyền hoặc bị chặn):
+    # Nếu process đang sống và đã qua thời gian khởi động (LAUNCH_GRACE), coi là đang chạy ổn định trong game
+    if is_roblox_running; then
+        local now; now=$(date +%s)
+        if [ $((now - ${LAST_LAUNCH:-0})) -ge ${LAUNCH_GRACE:-30} ]; then
+            return 0
+        fi
     fi
 
     return 1
@@ -703,19 +711,18 @@ check_roblox_log_for_disconnect() {
     # Kiểm tra thời gian sửa đổi của log file để tránh nhận nhầm log của phiên chơi cũ trước đó
     local mtime
     mtime=$(android_stat_mtime "$log_dir/$latest_log" 2>/dev/null | tr -d '\r\n')
-    # Thêm sai số 30 giây để xử lý tình trạng trễ đồng bộ của hệ thống tệp tin Android
-    if [ -n "$mtime" ] && [ "$((mtime + 30))" -lt "${LAST_LAUNCH:-0}" ]; then
-        # File log chưa được cập nhật cho phiên chơi mới, bỏ qua
+    # File log phải được cập nhật SAU thời điểm launch hiện tại
+    if [ -n "$mtime" ] && [ "$mtime" -lt "${LAST_LAUNCH:-0}" ]; then
         return 1
     fi
 
+    # Chỉ đọc 25 dòng mới nhất (thay vì 150 dòng cũ) để tránh đọc trúng lỗi disconnect cũ của các session trước
     local log_tail
-    log_tail=$(android_tail_lines 150 "$log_dir/$latest_log" 2>/dev/null)
+    log_tail=$(android_tail_lines 25 "$log_dir/$latest_log" 2>/dev/null)
     [ -z "$log_tail" ] && return 1
 
-    # Sử dụng grep -E -i (Extended Regex) tương thích tuyệt đối với Toybox/Busybox của Android
-    # Bổ sung các từ khóa quét lỗi kick và lỗi dữ liệu lưu trữ
-    if echo "$log_tail" | grep -E -i -q "connection lost|lost connection|disconnect|disconnected|server has shut down|server shutdown|shut down|shutdown|kick|kicked|moderation message|error code[:= ]*267|error code[:= ]*288|error code|game closed|pingpong|httpsendrequest failed|teleport failed|same account|save data|save data did.?n.?t load|didn.?t load right|data did.?n.?t load|please rejoin|closed connection|connection closed|failed to connect"; then
+    # Chỉ bắt các chuỗi lỗi ngắt kết nối / kick thực sự từ máy chủ Roblox, không bắt các từ khóa thông thường
+    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(267|277|279|288)|you have been kicked|kicked from this game|server was shut down|server has shut down"; then
         return 0
     fi
 
