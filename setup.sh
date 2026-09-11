@@ -262,15 +262,24 @@ progress_bar 1 3 "Đang quét gói Roblox..."
 sleep 0.5
 
 PACKAGES=""
+CLONE_PATTERN="roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx"
 if declare -F android_list_packages >/dev/null 2>&1; then
     android_set_executor "$EXECUTOR_TYPE"
-    PACKAGES=$(android_list_packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r')
+    PACKAGES=$(android_list_packages -3 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r')
+    [ -z "$PACKAGES" ] && PACKAGES=$(android_list_packages 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r')
 else
     case "$EXECUTOR_TYPE" in
-        su)     PACKAGES=$(su -c "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
-        adb)    PACKAGES=$(adb shell "pm list packages" 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
-        *)      PACKAGES=$(pm list packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r') ;;
+        su)     PACKAGES=$(su -c "pm list packages -3" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+        adb)    PACKAGES=$(adb shell "pm list packages -3" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+        *)      PACKAGES=$(pm list packages -3 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
     esac
+    if [ -z "$PACKAGES" ]; then
+        case "$EXECUTOR_TYPE" in
+            su)     PACKAGES=$(su -c "pm list packages" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+            adb)    PACKAGES=$(adb shell "pm list packages" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+            *)      PACKAGES=$(pm list packages 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+        esac
+    fi
 fi
 
 progress_bar 2 3 "Phân tích danh sách..."
@@ -280,7 +289,7 @@ if [ -z "$PACKAGES" ]; then
     PACKAGES="com.roblox.client"
     echo -e "  ${YLW}⚠ Không quét được bản clone, dùng gói mặc định${NC}"
 else
-    echo -e "  ${BGRN}✓ Tìm thấy các gói Roblox:${NC}"
+    echo -e "  ${BGRN}✓ Tìm thấy các gói Roblox / Clone:${NC}"
     for p in $PACKAGES; do
         echo -e "    ${CYN}→${NC} $p"
     done
@@ -319,11 +328,14 @@ echo -e "${BGRN}+------------------------------------------------------+${NC}"
 echo -e "${BGRN}|       KHOI DONG BOT CHO TUNG TAI KHOAN               |${NC}"
 echo -e "${BGRN}+------------------------------------------------------+${NC}"
 
+COUNT=1
+TOTAL=$(echo "$PACKAGES" | wc -w)
+
 for PKG in $PACKAGES; do
     CFG="config_${PKG}.cfg"
     LOG="roblox_${PKG}.log"
     WIN="${PKG//./_}"
-    SAVED_USERNAME="${USERNAME_MAP[$PKG]:-}"
+    SAVED_USERNAME=""
 
     EXISTING_PLACE_ID=""
     EXISTING_PRIVATE_CODE=""

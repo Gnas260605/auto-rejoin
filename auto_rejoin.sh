@@ -326,10 +326,10 @@ get_package_index() {
     # Nếu vẫn trống (ví dụ chưa chạy setup), quét hệ thống qua Executor (su/adb)
     if [ -z "$all_pkgs" ]; then
         init_executor
-        all_pkgs=$(android_list_packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r' | sort -u)
+        all_pkgs=$(android_list_packages 2>/dev/null | grep -iE "roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx" | cut -d: -f2 | tr -d '\r' | sort -u)
     fi
     if [ -z "$all_pkgs" ]; then
-        all_pkgs=$(ANDROID_EXECUTOR=direct android_list_packages 2>/dev/null | grep -i "roblox" | cut -d: -f2 | tr -d '\r' | sort -u)
+        all_pkgs=$(ANDROID_EXECUTOR=direct android_list_packages 2>/dev/null | grep -iE "roblox|aya\.|clone|delta|fluxus|arceus|hydrogen|codex|rbx" | cut -d: -f2 | tr -d '\r' | sort -u)
     fi
     [ -z "$all_pkgs" ] && all_pkgs="com.roblox.client"
 
