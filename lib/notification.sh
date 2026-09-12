@@ -70,3 +70,31 @@ notification_send_discord() {
         return 1
     fi
 }
+
+notification_send_discord_screenshot() {
+    local webhook="${1:-${DISCORD_WEBHOOK:-}}"
+    local message="$2"
+    local img_path="${3:-/tmp/roblox_screenshot.png}"
+
+    [ -n "$webhook" ] || return 0
+
+    # Capture screenshot using Android screencap if on device
+    if command -v screencap >/dev/null 2>&1; then
+        screencap -p "$img_path" 2>/dev/null || true
+    fi
+
+    if [ -f "$img_path" ] && [ -s "$img_path" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            curl -sSL --connect-timeout 10 --max-time 20 \
+                -F "content=${message}" \
+                -F "file=@${img_path}" \
+                "$webhook" >/dev/null 2>&1
+            local ret=$?
+            rm -f "$img_path" 2>/dev/null
+            return $ret
+        fi
+    fi
+
+    # Fallback to text message if screenshot cannot be captured
+    notification_send_discord "$webhook" "$message"
+}

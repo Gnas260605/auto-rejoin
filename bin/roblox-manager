@@ -23,8 +23,10 @@ INSTALLER_LIB="${PROJECT_DIR}/lib/installer.sh"
 LICENSE_LIB="${PROJECT_DIR}/lib/license.sh"
 ENTITLEMENT_LIB="${PROJECT_DIR}/lib/entitlement.sh"
 UPDATER_LIB="${PROJECT_DIR}/lib/updater.sh"
+COOKIE_LIB="${PROJECT_DIR}/lib/cookie.sh"
+DELTA_LIB="${PROJECT_DIR}/lib/delta.sh"
 
-for manager_lib in "$CONFIG_LIB" "$ANDROID_LIB" "$NETWORK_LIB" "$DOCTOR_LIB" "$UI_LIB" "$PROFILE_LIB" "$INSTALLER_LIB" "$LICENSE_LIB" "$ENTITLEMENT_LIB" "$UPDATER_LIB"; do
+for manager_lib in "$CONFIG_LIB" "$ANDROID_LIB" "$NETWORK_LIB" "$DOCTOR_LIB" "$UI_LIB" "$PROFILE_LIB" "$INSTALLER_LIB" "$LICENSE_LIB" "$ENTITLEMENT_LIB" "$UPDATER_LIB" "$COOKIE_LIB" "$DELTA_LIB"; do
     if [ ! -f "$manager_lib" ]; then
         echo "Error: missing manager library: $manager_lib" >&2
         exit 2
@@ -58,6 +60,8 @@ Usage:
   roblox-manager setup [--non-interactive --link URL --package PACKAGE]
   roblox-manager profile list|create|show|apply
   roblox-manager install-roblox [options] <HTTPS_APK_URL>
+  roblox-manager cookie import|export|validate <COOKIE_OR_ARGS>
+  roblox-manager delta get-key [--package PACKAGE]
   roblox-manager license activate|validate|status|deactivate
   roblox-manager update check|status|[--yes]
   roblox-manager support-bundle [--output PATH]
@@ -74,6 +78,8 @@ Commands:
   profile     Manage reusable monitor profiles under config/profiles.
   install-roblox
               Download to .part, validate, hash, install, and verify a Roblox APK.
+  cookie      Import, export, or validate Roblox .ROBLOSECURITY cookies.
+  delta       Extract HWID and auto-resolve Delta Executor keys.
   license     Activate, validate, inspect, or deactivate a local license cache.
   update      Check for, inspect, or install a signed release update.
   support-bundle
@@ -571,6 +577,86 @@ manager_support_bundle() {
     doctor_generate_support_bundle "$PROJECT_DIR" "$output"
 }
 
+manager_cookie() {
+    local action="${1:-help}"
+    [ "$#" -gt 0 ] && shift
+
+    case "$action" in
+        validate|check)
+            local cookie="${1:-}"
+            [ -n "$cookie" ] || { echo "Error: cookie is required" >&2; return 2; }
+            if cookie_validate "$cookie"; then
+                printf '✓ Cookie hợp lệ!\nUser ID     : %s\nUsername    : %s\nDisplayName : %s\n' \
+                    "$COOKIE_LAST_USER_ID" "$COOKIE_LAST_USERNAME" "$COOKIE_LAST_DISPLAY_NAME"
+                return 0
+            else
+                echo "✗ ${COOKIE_LAST_ERROR:-Cookie không hợp lệ.}" >&2
+                return 1
+            fi
+            ;;
+        import)
+            local cookie="${1:-}"
+            local pkg="${2:-com.roblox.client}"
+            [ -n "$cookie" ] || { echo "Error: cookie is required" >&2; return 2; }
+            if cookie_import_package "$pkg" "$cookie"; then
+                printf '✓ Đã import Cookie thành công vào gói %s!\n' "$pkg"
+                return 0
+            else
+                echo "✗ ${COOKIE_LAST_ERROR:-Import Cookie thất bại.}" >&2
+                return 1
+            fi
+            ;;
+        export)
+            local output_file="${1:-}"
+            cookie_export_all "$output_file"
+            ;;
+        *)
+            cat <<'EOF'
+Usage:
+  roblox-manager cookie validate <COOKIE>
+  roblox-manager cookie import <COOKIE> [PACKAGE]
+  roblox-manager cookie export [OUTPUT_FILE]
+EOF
+            return 2
+            ;;
+    esac
+}
+
+manager_delta() {
+    local action="${1:-get-key}"
+    [ "$#" -gt 0 ] && shift
+
+    case "$action" in
+        get-key|key)
+            local pkg="${1:-com.roblox.client}"
+            printf 'Đang trích xuất HWID từ Delta (%s)...\n' "$pkg"
+            if delta_extract_hwid "$pkg"; then
+                printf '✓ Tìm thấy HWID: %s\n' "$DELTA_LAST_HWID"
+                printf 'Đang tự động vượt key Delta...\n'
+                if delta_resolve_key "$DELTA_LAST_HWID"; then
+                    printf '✓ Lấy Key thành công: %s\n' "$DELTA_LAST_KEY"
+                    delta_set_clipboard_key "$DELTA_LAST_KEY"
+                    printf '✓ Đã copy Key vào clipboard!\n'
+                    return 0
+                else
+                    echo "✗ ${DELTA_LAST_ERROR:-Bypass key thất bại.}" >&2
+                    return 1
+                fi
+            else
+                echo "✗ ${DELTA_LAST_ERROR:-Không tìm thấy HWID.}" >&2
+                return 1
+            fi
+            ;;
+        *)
+            cat <<'EOF'
+Usage:
+  roblox-manager delta get-key [--package PACKAGE]
+EOF
+            return 2
+            ;;
+    esac
+}
+
 manager_status() {
     cd "$PROJECT_DIR" || return 2
     bash "$PROJECT_DIR/auto_rejoin.sh"
@@ -614,6 +700,12 @@ case "$command_name" in
         ;;
     install-roblox)
         manager_install_roblox "$@"
+        ;;
+    cookie)
+        manager_cookie "$@"
+        ;;
+    delta|delta-key)
+        manager_delta "$@"
         ;;
     license)
         manager_license "$@"

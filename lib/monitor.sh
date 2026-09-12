@@ -166,6 +166,20 @@ monitor_handle_loading() {
         return 0
     fi
 
+    # Fast Skip: Nếu bị kẹt trong Hàng đợi (Queue / Your position in line) quá 12s, đổi server ngay lập tức
+    if [ "$time_stuck" -ge 12 ] && [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
+        if check_roblox_log_for_disconnect || [ "$time_stuck" -ge 20 ]; then
+            if [ "$LOBBY_RETRY_COUNT" -lt 5 ]; then
+                LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
+                LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
+                log_msg "${YLW}[QUEUE_SKIP]${NC} Phát hiện dính Hàng đợi (Queue)! Đang đổi sang server ít người khác ngay..."
+                log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "queue_skip_retry" retry "$LOBBY_RETRY_COUNT"
+                monitor_request_recovery "queue_skip_retry" "true"
+                return 0
+            fi
+        fi
+    fi
+
     time_stuck=$((now - LAST_IN_GAME))
     if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
         if [ "$LOBBY_RETRY_COUNT" -lt 3 ]; then
