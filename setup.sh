@@ -100,6 +100,12 @@ PRIVATE_CODE="${2:-}"
 SETUP_LICENSE_KEY="${AUTO_REJOIN_LICENSE_KEY:-${LICENSE_KEY:-${3:-}}}"
 SETUP_LICENSE_MODE="${AUTO_REJOIN_LICENSE_MODE:-${LICENSE_MODE:-optional}}"
 SETUP_LICENSE_API="${AUTO_REJOIN_LICENSE_API:-${LICENSE_API:-}}"
+SETUP_JOIN_LOW_SERVER="${AUTO_REJOIN_JOIN_LOW_SERVER:-${JOIN_LOW_SERVER:-}}"
+SETUP_LOW_SERVER_MIN_PLAYERS="${AUTO_REJOIN_LOW_SERVER_MIN_PLAYERS:-${LOW_SERVER_MIN_PLAYERS:-}}"
+SETUP_LOW_SERVER_MAX_PLAYERS="${AUTO_REJOIN_LOW_SERVER_MAX_PLAYERS:-${LOW_SERVER_MAX_PLAYERS:-}}"
+SETUP_LOW_SERVER_STRICT="${AUTO_REJOIN_LOW_SERVER_STRICT:-${LOW_SERVER_STRICT:-}}"
+SETUP_ALLOW_UNSCOPED_DEEPLINK="${AUTO_REJOIN_ALLOW_UNSCOPED_DEEPLINK:-${ALLOW_UNSCOPED_DEEPLINK:-}}"
+SETUP_ALLOW_HOME_FALLBACK="${AUTO_REJOIN_ALLOW_HOME_FALLBACK:-${ALLOW_HOME_FALLBACK:-}}"
 
 if [ -z "$PLACE_ID" ] && [ -f "${SCRIPT_DIR}/config.env" ]; then
     CFG_PLACE="$(grep -E '^PLACE_ID=' "${SCRIPT_DIR}/config.env" 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d '"\r')"
@@ -113,8 +119,10 @@ PRIVATE_CODE="${PRIVATE_CODE:-}"
 printf "${BGRN}║${NC}  Place ID    : ${YLW}%-36s${NC}${BGRN}║${NC}\n" "$PLACE_ID"
 if [ -n "$PRIVATE_CODE" ]; then
     printf "${BGRN}║${NC}  Private Code: ${YLW}%-36s${NC}${BGRN}║${NC}\n" "$PRIVATE_CODE"
+elif [ "${SETUP_JOIN_LOW_SERVER}" = "true" ]; then
+    printf "${BGRN}║${NC}  Chế độ      : ${YLW}%-36s${NC}${BGRN}║${NC}\n" "Low Server (Ít người)"
 else
-    printf "${BGRN}║${NC}  Chế độ      : ${YLW}%-36s${NC}${BGRN}║${NC}\n" "Public Server"
+    printf "${BGRN}║${NC}  Chế độ      : ${YLW}%-36s${NC}${BGRN}║${NC}\n" "Public Server (Mặc định)"
 fi
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
