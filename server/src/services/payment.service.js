@@ -38,6 +38,26 @@ function planExpirySeconds(planId, matchedPlan) {
   return 30 * 86400;
 }
 
+function canonicalizeWebhookData(data) {
+  return Object.keys(data || {})
+    .filter((key) => key !== "signature")
+    .sort()
+    .map((key) => `${key}=${data[key] ?? ""}`)
+    .join("&");
+}
+
+function safeEqualHex(left, right) {
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+  } catch (_error) {
+    return false;
+  }
+}
+
 export class PaymentService {
   constructor({ paymentRepository, licenseRepository, adminRepository, config }) {
     this.paymentRepo = paymentRepository;
@@ -547,6 +567,26 @@ export class PaymentService {
       message: "Kiểm tra cấu hình PayOS thành công! Chữ ký HMAC SHA256 hoạt động chuẩn xác.",
       signatureSample: computedSignature.slice(0, 16) + "..."
     };
+  }
+
+  async verifyPayOSWebhookSignature(payload = {}) {
+    const savedConfig = (await this.adminRepo.getSystemSetting("payos_config")) || {};
+    if (!savedConfig.enabled || !savedConfig.checksumKey) {
+      return { ok: true, skipped: true };
+    }
+
+    const signature = String(payload.signature || payload.data?.signature || "").trim();
+    if (!signature) {
+      return { ok: false, reason: "MISSING_SIGNATURE" };
+    }
+
+    const data = payload.data && typeof payload.data === "object" ? payload.data : payload;
+    const canonical = canonicalizeWebhookData(data);
+    const expected = crypto.createHmac("sha256", savedConfig.checksumKey).update(canonical).digest("hex");
+
+    return safeEqualHex(signature, expected)
+      ? { ok: true }
+      : { ok: false, reason: "INVALID_SIGNATURE" };
   }
 
   async dispatchPaymentNotifications(payment, rawKey, amount) {

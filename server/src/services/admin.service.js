@@ -91,7 +91,8 @@ function buildAllInOneCommand({ domain, placeId, rawKey, antiAfk = false, joinLo
   const lowServerParam = joinLowServer !== false
     ? `JOIN_LOW_SERVER=true LOW_SERVER_MIN_PLAYERS=${minPlayers ?? 0} LOW_SERVER_MAX_PLAYERS=${maxPlayers ?? 2} LOW_SERVER_STRICT=true `
     : "JOIN_LOW_SERVER=false ";
-  return `cd ~; rm -rf auto-rejoin; mkdir -p auto-rejoin; cd auto-rejoin; curl -fSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh; AUTO_REJOIN_LICENSE_API="${apiBase}" AUTO_REJOIN_LICENSE_MODE=required LICENSE_KEY="${rawKey}" ${antiAfkParam}${lowServerParam}bash setup.sh ${targetPlaceId}`;
+  const httpDevParam = apiBase.startsWith("http://") ? "AUTO_REJOIN_LICENSE_ALLOW_HTTP_DEV=true " : "";
+  return `cd ~; rm -rf auto-rejoin; mkdir -p auto-rejoin; cd auto-rejoin; curl -fSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh -o setup.sh; ${httpDevParam}AUTO_REJOIN_LICENSE_API="${apiBase}" AUTO_REJOIN_LICENSE_MODE=required LICENSE_KEY="${rawKey}" ${antiAfkParam}${lowServerParam}bash setup.sh ${targetPlaceId}`;
 }
 
 export class AdminService {

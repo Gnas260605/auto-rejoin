@@ -60,8 +60,9 @@ Usage:
   roblox-manager setup [--non-interactive --link URL --package PACKAGE]
   roblox-manager profile list|create|show|apply
   roblox-manager install-roblox [options] <HTTPS_APK_URL>
-  roblox-manager cookie import|export|validate <COOKIE_OR_ARGS>
-  roblox-manager delta get-key [--package PACKAGE]
+  roblox-manager cookie validate <COOKIE>
+  roblox-manager delta status [PACKAGE]
+  roblox-manager features
   roblox-manager license activate|validate|status|deactivate
   roblox-manager update check|status|[--yes]
   roblox-manager support-bundle [--output PATH]
@@ -78,8 +79,9 @@ Commands:
   profile     Manage reusable monitor profiles under config/profiles.
   install-roblox
               Download to .part, validate, hash, install, and verify a Roblox APK.
-  cookie      Import, export, or validate Roblox .ROBLOSECURITY cookies.
-  delta       Extract HWID and auto-resolve Delta Executor keys.
+  cookie      Validate a user-provided Roblox cookie; raw import/export is blocked.
+  delta       Show Delta HWID/key-flow status without bypassing key systems.
+  features    Print supported and intentionally unsupported feature status.
   license     Activate, validate, inspect, or deactivate a local license cache.
   update      Check for, inspect, or install a signed release update.
   support-bundle
@@ -586,11 +588,11 @@ manager_cookie() {
             local cookie="${1:-}"
             [ -n "$cookie" ] || { echo "Error: cookie is required" >&2; return 2; }
             if cookie_validate "$cookie"; then
-                printf '✓ Cookie hợp lệ!\nUser ID     : %s\nUsername    : %s\nDisplayName : %s\n' \
+                printf 'Cookie is valid.\nUser ID     : %s\nUsername    : %s\nDisplayName : %s\n' \
                     "$COOKIE_LAST_USER_ID" "$COOKIE_LAST_USERNAME" "$COOKIE_LAST_DISPLAY_NAME"
                 return 0
             else
-                echo "✗ ${COOKIE_LAST_ERROR:-Cookie không hợp lệ.}" >&2
+                echo "Error: ${COOKIE_LAST_ERROR:-Cookie is invalid.}" >&2
                 return 1
             fi
             ;;
@@ -598,22 +600,22 @@ manager_cookie() {
             local cookie="${1:-}"
             local pkg="${2:-com.roblox.client}"
             [ -n "$cookie" ] || { echo "Error: cookie is required" >&2; return 2; }
-            if cookie_import_package "$pkg" "$cookie"; then
-                printf '✓ Đã import Cookie thành công vào gói %s!\n' "$pkg"
-                return 0
-            else
-                echo "✗ ${COOKIE_LAST_ERROR:-Import Cookie thất bại.}" >&2
-                return 1
-            fi
+            cookie_import_package "$pkg" "$cookie" >/dev/null 2>&1 || true
+            echo "Error: ${COOKIE_LAST_ERROR:-Raw cookie import is disabled.}" >&2
+            return 1
             ;;
         export)
             local output_file="${1:-}"
-            cookie_export_all "$output_file"
+            cookie_export_all "$output_file" >/dev/null 2>&1 || true
+            echo "Error: ${COOKIE_LAST_ERROR:-Raw cookie export is disabled.}" >&2
+            return 1
             ;;
         *)
             cat <<'EOF'
 Usage:
   roblox-manager cookie validate <COOKIE>
+
+Disabled:
   roblox-manager cookie import <COOKIE> [PACKAGE]
   roblox-manager cookie export [OUTPUT_FILE]
 EOF
@@ -623,40 +625,47 @@ EOF
 }
 
 manager_delta() {
-    local action="${1:-get-key}"
+    local action="${1:-status}"
     [ "$#" -gt 0 ] && shift
 
     case "$action" in
-        get-key|key)
+        status|get-key|key)
             local pkg="${1:-com.roblox.client}"
-            printf 'Đang trích xuất HWID từ Delta (%s)...\n' "$pkg"
+            printf 'Checking Delta local status for %s...\n' "$pkg"
             if delta_extract_hwid "$pkg"; then
-                printf '✓ Tìm thấy HWID: %s\n' "$DELTA_LAST_HWID"
-                printf 'Đang tự động vượt key Delta...\n'
-                if delta_resolve_key "$DELTA_LAST_HWID"; then
-                    printf '✓ Lấy Key thành công: %s\n' "$DELTA_LAST_KEY"
-                    delta_set_clipboard_key "$DELTA_LAST_KEY"
-                    printf '✓ Đã copy Key vào clipboard!\n'
-                    return 0
-                else
-                    echo "✗ ${DELTA_LAST_ERROR:-Bypass key thất bại.}" >&2
-                    return 1
-                fi
+                printf 'HWID found: %s\n' "$DELTA_LAST_HWID"
+                printf 'Automatic Delta key bypass is not supported. Complete the official key flow manually.\n'
+                return 0
             else
-                echo "✗ ${DELTA_LAST_ERROR:-Không tìm thấy HWID.}" >&2
+                echo "Error: ${DELTA_LAST_ERROR:-Delta HWID was not found.}" >&2
                 return 1
             fi
             ;;
         *)
             cat <<'EOF'
 Usage:
-  roblox-manager delta get-key [--package PACKAGE]
+  roblox-manager delta status [PACKAGE]
 EOF
             return 2
             ;;
     esac
 }
 
+manager_features() {
+    cat <<'EOF'
+Feature status:
+  supported   Auto rejoin Roblox game sessions
+  supported   License keys and device management through the admin web dashboard
+  supported   Signed updates and future release delivery
+  limited     Cookie validation for a user-provided token
+  disabled    Quick login by raw cookie injection
+  disabled    Raw cookie export from Roblox app storage
+  disabled    reCAPTCHA solving/bypass automation
+  disabled    Delta/X key bypass automation
+
+Use official Roblox/Delta login and key flows for account-sensitive operations.
+EOF
+}
 manager_status() {
     cd "$PROJECT_DIR" || return 2
     bash "$PROJECT_DIR/auto_rejoin.sh"
@@ -706,6 +715,9 @@ case "$command_name" in
         ;;
     delta|delta-key)
         manager_delta "$@"
+        ;;
+    features)
+        manager_features
         ;;
     license)
         manager_license "$@"

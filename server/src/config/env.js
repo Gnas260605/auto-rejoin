@@ -22,11 +22,36 @@ function boolEnv(name, fallback) {
   return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
 }
 
+function isPlaceholderSecret(value) {
+  return /change-this|replace|placeholder|dev_insecure/i.test(value || "");
+}
+
+function requireProduction(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 export function loadEnv() {
   const nodeEnv = process.env.NODE_ENV || "development";
   const jwtSecret = process.env.ADMIN_JWT_SECRET || (nodeEnv === "production" ? "" : "dev_insecure_admin_jwt_secret_32_chars_long!");
-  if (nodeEnv === "production" && (!jwtSecret || jwtSecret.length < 16)) {
-    throw new Error("ADMIN_JWT_SECRET must be at least 16 characters in production");
+  const licenseKeyPepper = process.env.LICENSE_KEY_PEPPER || "";
+  const dbName = process.env.DB_NAME || "auto_rejoin_license";
+  const adminOrigins = (process.env.ADMIN_ORIGIN || "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const cookieSecure = boolEnv("COOKIE_SECURE", nodeEnv === "production");
+  const cookieSameSite = process.env.COOKIE_SAMESITE || process.env.COOKIE_SAME_SITE || "lax";
+  const rateLimitEnabled = boolEnv("RATE_LIMIT_ENABLED", true);
+
+  if (nodeEnv === "production") {
+    requireProduction(jwtSecret.length >= 32 && !isPlaceholderSecret(jwtSecret), "ADMIN_JWT_SECRET must be at least 32 non-placeholder characters in production");
+    requireProduction(licenseKeyPepper.length >= 32 && !isPlaceholderSecret(licenseKeyPepper), "LICENSE_KEY_PEPPER must be at least 32 non-placeholder characters in production");
+    requireProduction(!dbName.endsWith("_test"), "DB_NAME must not point to a _test database in production");
+    requireProduction(adminOrigins.length > 0 && !adminOrigins.includes("*"), "ADMIN_ORIGIN must be explicit and must not include * in production");
+    requireProduction(cookieSecure === true, "COOKIE_SECURE must be true in production");
+    requireProduction(rateLimitEnabled === true, "RATE_LIMIT_ENABLED must be true in production");
   }
 
   return {
@@ -37,10 +62,10 @@ export function loadEnv() {
       port: intEnv("DB_PORT", 3306),
       user: process.env.DB_USER || "auto_rejoin",
       password: process.env.DB_PASSWORD || "",
-      database: process.env.DB_NAME || "auto_rejoin_license"
+      database: dbName
     },
     license: {
-      keyPepper: process.env.LICENSE_KEY_PEPPER || "",
+      keyPepper: licenseKeyPepper,
       tokenTtlSeconds: intEnv("LICENSE_TOKEN_TTL_SECONDS", 2592000),
       revalidateAfterSeconds: intEnv("LICENSE_REVALIDATE_AFTER_SECONDS", 3600),
       minClientVersion: process.env.MIN_CLIENT_VERSION || "",
@@ -53,15 +78,12 @@ export function loadEnv() {
     admin: {
       jwtSecret,
       tokenTtlSeconds: intEnv("ADMIN_TOKEN_TTL_SECONDS", 86400),
-      origins: (process.env.ADMIN_ORIGIN || "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      cookieSecure: boolEnv("COOKIE_SECURE", nodeEnv === "production"),
-      cookieSameSite: process.env.COOKIE_SAMESITE || "lax"
+      origins: adminOrigins,
+      cookieSecure,
+      cookieSameSite
     },
     rateLimit: {
-      enabled: boolEnv("RATE_LIMIT_ENABLED", true),
+      enabled: rateLimitEnabled,
       windowMs: intEnv("RATE_LIMIT_WINDOW_MS", 900000),
       activateMax: intEnv("RATE_LIMIT_ACTIVATE_MAX", 20),
       validateMax: intEnv("RATE_LIMIT_VALIDATE_MAX", 120),
@@ -73,4 +95,3 @@ export function loadEnv() {
 }
 
 export const env = loadEnv();
-

@@ -103,7 +103,7 @@ test("health returns ok without leaking database details in injected mode", asyn
   const app = createApp({ repository: new RouteRepo(), config });
   const response = await request(app).get("/api/v1/health").expect(200);
   assert.equal(response.body.ok, true);
-  assert.equal(response.body.database, "ok");
+  assert.equal(response.body.database, undefined);
   assert.equal(typeof response.body.time, "string");
   assert.equal(response.body.DB_PASSWORD, undefined);
 });

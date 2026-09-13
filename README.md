@@ -125,6 +125,7 @@ bin/roblox-manager parse-link "https://www.roblox.com/games/2753915549/Game"
 bin/roblox-manager setup
 bin/roblox-manager profile list
 bin/roblox-manager install-roblox "https://example.com/Roblox.apk"
+bin/roblox-manager features
 bin/roblox-manager update check
 bin/roblox-manager update --yes
 bin/roblox-manager self-test
@@ -132,6 +133,30 @@ bin/roblox-manager self-test
 
 `roblox-manager version` prints `Auto Rejoin Pro <VERSION>` and marks dev builds
 as development builds.
+
+## Feature Safety Status
+
+`bin/roblox-manager features` prints the current product feature matrix.
+
+Supported:
+
+- Auto rejoin Roblox game sessions.
+- License keys and device management through the admin web dashboard.
+- Signed updates for future feature delivery.
+
+Limited:
+
+- Cookie validation is available only for a token explicitly provided by the user.
+
+Disabled by design:
+
+- Quick login by injecting raw Roblox cookies.
+- Exporting raw Roblox cookies from app storage.
+- reCAPTCHA solving or bypass automation.
+- Delta/X key bypass automation.
+
+Use the official Roblox/Delta login and key flows for account-sensitive
+operations.
 
 ## Signed Updates
 
@@ -349,4 +374,3 @@ MySQL Tables (admin_users, admin_audit_events, licenses, license_devices, licens
    ```
 
 See `ADMIN_ARCHITECTURE.md` and `ADMIN_DEPLOYMENT_CHECKLIST.md` for complete architecture and deployment instructions.
-

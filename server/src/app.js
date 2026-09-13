@@ -76,7 +76,7 @@ export function createApp({ repository, adminRepository, paymentRepository, conf
       if (!repository) {
         await getPool().query("SELECT 1");
       }
-      res.json({ ok: true, database: "ok", time: isoNow() });
+      res.json({ ok: true, time: isoNow() });
     } catch (error) {
       next(error);
     }

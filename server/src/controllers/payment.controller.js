@@ -170,6 +170,14 @@ export class PaymentController {
   handlePayOSWebhook = async (req, res, next) => {
     try {
       const body = req.body || {};
+      const signatureCheck = await this.service.verifyPayOSWebhookSignature(body);
+      if (!signatureCheck.ok) {
+        return res.status(401).json({
+          error: 1,
+          message: signatureCheck.reason || "INVALID_SIGNATURE"
+        });
+      }
+
       const data = body.data || body;
       
       const transferContent = data.description || data.content || body.description || "";

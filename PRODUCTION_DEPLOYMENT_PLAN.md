@@ -54,7 +54,7 @@ graph TD
   ADMIN_JWT_SECRET=GeneratedBase64JwtSecretHere
   
   COOKIE_SECURE=true
-  COOKIE_SAME_SITE=strict
+  COOKIE_SAMESITE=strict
   ADMIN_ORIGIN=https://admin.yourdomain.com,https://yourdomain.com
   CLIENT_BASE_URL=https://yourdomain.com
   ```

@@ -25,6 +25,10 @@ The migration creates:
 - `license_devices`
 - `license_tokens`
 - `license_events`
+- `admin_users`
+- `admin_audit_events`
+- `system_settings`
+- `payments`
 - `schema_migrations`
 
 ## Start
@@ -38,6 +42,37 @@ Health:
 ```bash
 curl http://127.0.0.1:3000/api/v1/health
 ```
+
+The public health response intentionally avoids database version/table details.
+
+## Production Preflight
+
+Production must pass the preflight check before go-live:
+
+```bash
+npm run verify:prod
+```
+
+The preflight fails closed when `NODE_ENV` is not `production`, `DB_NAME` points
+at a `_test` database, rate limiting is disabled, cookies are not secure, CORS
+origins are wildcarded, required tables are missing, or production secrets are
+weak/placeholders.
+
+## Backup
+
+Use a dedicated backup user where possible, then schedule:
+
+```bash
+BACKUP_DIR=/var/backups/mysql/auto_rejoin \
+DB_NAME=auto_rejoin_license \
+DB_USER=auto_rejoin_backup \
+DB_PASSWORD="..." \
+server/scripts/backup-db.sh
+```
+
+The script writes backups with restrictive permissions, avoids placing the
+database password in process arguments, validates the gzip archive, and only
+renames the `.part` file after a successful dump.
 
 ## Create A Development License
 

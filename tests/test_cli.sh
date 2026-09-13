@@ -31,6 +31,7 @@ help_command() {
     assert_status "help" 0 "$CLI" help
     assert_contains "help output" "parse-link" "${TEST_TMP}/out"
     assert_contains "help license output" "license" "${TEST_TMP}/out"
+    assert_contains "help features output" "features" "${TEST_TMP}/out"
 }
 
 version_command() {
@@ -123,6 +124,12 @@ support_bundle_command() {
     assert_contains "help support-bundle output" "support-bundle" "${TEST_TMP}/out"
 }
 
+features_command() {
+    assert_status "features" 0 "$CLI" features
+    assert_contains "features supported rejoin" "Auto rejoin Roblox game sessions" "${TEST_TMP}/out"
+    assert_contains "features disabled captcha" "reCAPTCHA solving/bypass automation" "${TEST_TMP}/out"
+}
+
 outside_cwd() {
     (
         cd "$TEST_TMP" || exit 2
@@ -150,6 +157,7 @@ license_help_command
 license_unknown_command
 update_help_command
 support_bundle_command
+features_command
 self_test_command
 outside_cwd
 

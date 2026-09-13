@@ -27,7 +27,7 @@ test_delta_empty_hwid() {
         echo "FAIL: empty hwid should not resolve" >&2
         TEST_FAIL=$((TEST_FAIL + 1))
     else
-        TEST_PASS=$((TEST_PASS + 1))
+        assert_eq "delta bypass blocked" "Automatic Delta key bypass is not supported. Complete the official Delta key flow manually." "$DELTA_LAST_ERROR"
     fi
 }
 

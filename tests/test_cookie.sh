@@ -37,8 +37,28 @@ test_cookie_validate_empty() {
     fi
 }
 
+test_cookie_export_blocked() {
+    if cookie_export_all "/tmp/roblox-cookie-export.txt"; then
+        echo "FAIL: cookie export should be blocked" >&2
+        TEST_FAIL=$((TEST_FAIL + 1))
+    else
+        assert_eq "cookie export blocked reason" "Raw Roblox cookie export is disabled because cookies are login credentials. Use the official Roblox login flow in the app." "$COOKIE_LAST_ERROR"
+    fi
+}
+
+test_cookie_import_blocked() {
+    if cookie_import_package "com.roblox.client" "secret-cookie"; then
+        echo "FAIL: cookie import should be blocked" >&2
+        TEST_FAIL=$((TEST_FAIL + 1))
+    else
+        assert_eq "cookie import blocked reason" "Raw Roblox cookie import into com.roblox.client is disabled because it injects login credentials. Use the official Roblox login flow in the app." "$COOKIE_LAST_ERROR"
+    fi
+}
+
 test_cookie_clean
 test_cookie_validate_empty
+test_cookie_export_blocked
+test_cookie_import_blocked
 
 echo "test_cookie.sh: PASS=${TEST_PASS} FAIL=${TEST_FAIL}"
 [ "$TEST_FAIL" -eq 0 ] || exit 1
