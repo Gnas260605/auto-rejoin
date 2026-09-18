@@ -10,9 +10,12 @@ export function secondsFromNow(seconds, baseDate = nowDate()) {
   return new Date(baseDate.getTime() + Number(seconds) * 1000);
 }
 
-export function mysqlDate(date) {
-  return date.toISOString().slice(0, 19).replace("T", " ");
+export function mysqlDate(date = nowDate()) {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toISOString().slice(0, 19).replace("T", " ");
 }
+
+export const toSqlDate = mysqlDate;
 
 export function isExpired(expiresAt, now = nowDate()) {
   if (!expiresAt) {

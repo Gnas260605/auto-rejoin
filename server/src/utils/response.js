@@ -20,3 +20,21 @@ export function errorResponse(code, message, extras = {}) {
     serverTime: extras.serverTime || isoNow()
   };
 }
+
+export function sendSuccess(res, data = {}, status = 200) {
+  return res.status(status).json({
+    ok: true,
+    ...data,
+    serverTime: isoNow()
+  });
+}
+
+export function sendError(res, message, status = 400, code = "BAD_REQUEST", extras = {}) {
+  return res.status(status).json({
+    ok: false,
+    code,
+    message,
+    ...extras,
+    serverTime: isoNow()
+  });
+}

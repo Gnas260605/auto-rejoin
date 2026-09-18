@@ -19,6 +19,14 @@ MONITOR_RECOVERY_REASON="${MONITOR_RECOVERY_REASON:-}"
 MONITOR_RECOVERY_COUNT_REJOIN="${MONITOR_RECOVERY_COUNT_REJOIN:-true}"
 MONITOR_OFFLINE_NOTIFIED="${MONITOR_OFFLINE_NOTIFIED:-false}"
 MONITOR_COOLDOWN_NOTIFIED="${MONITOR_COOLDOWN_NOTIFIED:-false}"
+LOADING_STARTED_AT="${LOADING_STARTED_AT:-0}"
+WINDOW_MISSING_COUNT="${WINDOW_MISSING_COUNT:-0}"
+LOBBY_RETRY_COUNT="${LOBBY_RETRY_COUNT:-0}"
+LOW_SERVER_RETRY_OFFSET="${LOW_SERVER_RETRY_OFFSET:-0}"
+WINDOW_MISSING_THRESHOLD="${WINDOW_MISSING_THRESHOLD:-3}"
+WINDOW_REOPEN_ENABLED="${WINDOW_REOPEN_ENABLED:-true}"
+LOBBY_RETRY_LIMIT="${LOBBY_RETRY_LIMIT:-3}"
+LOBBY_RETRY_DELAY="${LOBBY_RETRY_DELAY:-3}"
 
 monitor_now() {
     if [ -n "${MONITOR_NOW:-}" ]; then
@@ -113,16 +121,38 @@ monitor_wrong_place_detected() {
     declare -F check_roblox_log_for_wrong_place >/dev/null 2>&1 && check_roblox_log_for_wrong_place
 }
 
+monitor_disconnect_detected() {
+    if declare -F check_roblox_log_for_disconnect >/dev/null 2>&1 && check_roblox_log_for_disconnect; then
+        return 0
+    fi
+    if declare -F check_roblox_screen_for_disconnect >/dev/null 2>&1 && check_roblox_screen_for_disconnect; then
+        return 0
+    fi
+    return 1
+}
+
 monitor_launch_once() {
     STABLE_SINCE=0
+    LOADING_STARTED_AT="$(monitor_now)"
+    WINDOW_MISSING_COUNT=0
+    local reason="${1:-launch_sent}"
+    if [ "$reason" = "window_closed" ]; then
+        log_event INFO window_relaunch_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
+    fi
     if ! launch_roblox; then
-        log_event WARN launch_attempt_failed "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "${1:-launch_sent}"
+        log_event WARN launch_attempt_failed "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
+        if [ "$reason" = "window_closed" ]; then
+            log_event WARN window_relaunch_failed "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" reason "launch_error"
+        fi
         MONITOR_RECOVERY_REASON="launch_failed"
         MONITOR_RECOVERY_COUNT_REJOIN="true"
         monitor_transition "$MONITOR_STATE_RECOVERING" "launch_failed"
         return 1
     fi
-    monitor_transition "$MONITOR_STATE_LOADING" "${1:-launch_sent}"
+    if [ "$reason" = "window_closed" ]; then
+        log_event INFO window_relaunch_success "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
+    fi
+    monitor_transition "$MONITOR_STATE_LOADING" "$reason"
 }
 
 monitor_handle_launching() {
@@ -149,7 +179,27 @@ monitor_handle_loading() {
         return 0
     fi
 
-    if check_roblox_log_for_disconnect; then
+    # Bug 1: Check window visibility if window reopening is enabled
+    if [ "${WINDOW_REOPEN_ENABLED:-true}" = "true" ] && declare -F check_roblox_window_visible >/dev/null 2>&1; then
+        if ! check_roblox_window_visible; then
+            WINDOW_MISSING_COUNT=$((WINDOW_MISSING_COUNT + 1))
+            log_event WARN window_missing "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" count "$WINDOW_MISSING_COUNT" threshold "$WINDOW_MISSING_THRESHOLD"
+            log_msg "${YLW}[WINDOW]${NC} Không thấy cửa sổ Roblox (Lần $WINDOW_MISSING_COUNT/$WINDOW_MISSING_THRESHOLD)..."
+            if [ "$WINDOW_MISSING_COUNT" -ge "$WINDOW_MISSING_THRESHOLD" ]; then
+                log_msg "${RED}[WINDOW]${NC} Cửa sổ Roblox bị đóng! Tự động mở lại game..."
+                log_event WARN window_closed_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
+                send_discord "🪟 **[$ROBLOX_PACKAGE]** Cửa sổ Roblox bị đóng. Đang tự động mở lại..."
+                WINDOW_MISSING_COUNT=0
+                monitor_request_recovery "window_closed" "true"
+                return 0
+            fi
+            return 0
+        else
+            WINDOW_MISSING_COUNT=0
+        fi
+    fi
+
+    if monitor_disconnect_detected; then
         monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
         return 0
     fi
@@ -162,13 +212,24 @@ monitor_handle_loading() {
 
     if is_in_game; then
         LAST_IN_GAME="$now"
+        WINDOW_MISSING_COUNT=0
+        if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
+            log_msg "${GRN}[GAME]${NC} Đã vào game thành công! Reset bộ đếm sảnh."
+            LOBBY_RETRY_COUNT=0
+            LOW_SERVER_RETRY_OFFSET=0
+        fi
+        log_event INFO game_session_confirmed "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
         monitor_transition "$MONITOR_STATE_IN_GAME" "game_activity_detected"
         return 0
     fi
 
+    # Bug 2 fix: calculate time_stuck using LOADING_STARTED_AT before comparisons
+    time_stuck=$((now - LOADING_STARTED_AT))
+
     # Fast Skip: Nếu bị kẹt trong Hàng đợi (Queue / Your position in line) quá 12s, đổi server ngay lập tức
     if [ "$time_stuck" -ge 12 ] && [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
-        if check_roblox_log_for_disconnect || [ "$time_stuck" -ge 20 ]; then
+        if monitor_disconnect_detected || [ "$time_stuck" -ge 20 ]; then
+            log_event INFO queue_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" time_stuck "$time_stuck"
             if [ "$LOBBY_RETRY_COUNT" -lt 5 ]; then
                 LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
                 LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
@@ -180,17 +241,17 @@ monitor_handle_loading() {
         fi
     fi
 
-    time_stuck=$((now - LAST_IN_GAME))
     if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
-        if [ "$LOBBY_RETRY_COUNT" -lt 3 ]; then
+        log_event WARN lobby_timeout "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" time_stuck "$time_stuck" retry "$LOBBY_RETRY_COUNT"
+        if [ "$LOBBY_RETRY_COUNT" -lt "$LOBBY_RETRY_LIMIT" ]; then
             LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
             LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
-            log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh/loading ${time_stuck}s! Force-stop rồi chọn lại server ít người (Lần thử $LOBBY_RETRY_COUNT/3)..."
-            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh/loading ${time_stuck}s. Đang force-stop và chọn lại server ít người (Thử lần $LOBBY_RETRY_COUNT/3)..."
-            log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "lobby_deeplink_retry" retry "$LOBBY_RETRY_COUNT"
+            log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh/loading ${time_stuck}s! Force-stop rồi chọn lại server ít người (Lần thử $LOBBY_RETRY_COUNT/$LOBBY_RETRY_LIMIT)..."
+            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh/loading ${time_stuck}s. Đang force-stop và chọn lại server ít người (Thử lần $LOBBY_RETRY_COUNT/$LOBBY_RETRY_LIMIT)..."
+            log_event INFO lobby_retry "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" retry "$LOBBY_RETRY_COUNT" limit "$LOBBY_RETRY_LIMIT"
             monitor_request_recovery "lobby_deeplink_retry" "true"
         else
-            log_msg "${RED}[LOBBY]${NC} Kẹt ở sảnh quá lâu (> 3 lần thử)! Tiến hành khởi động lại game..."
+            log_msg "${RED}[LOBBY]${NC} Kẹt ở sảnh quá lâu (> $LOBBY_RETRY_LIMIT lần thử)! Tiến hành khởi động lại game..."
             send_discord "🚨 **[$ROBLOX_PACKAGE]** Kẹt ở sảnh quá lâu. Khởi động lại game!"
             monitor_request_recovery "loading_timeout" "true"
         fi
@@ -199,6 +260,7 @@ monitor_handle_loading() {
 
     STABLE_SINCE=0
     time_left=$((IN_GAME_TIMEOUT - time_stuck))
+    log_event INFO lobby_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" time_stuck "$time_stuck" time_left "$time_left"
     log_msg "${YLW}[LOBBY]${NC} Đang ở sảnh/loading, chờ vào map... (${time_left}s còn lại)"
 }
 
@@ -215,7 +277,27 @@ monitor_handle_in_game() {
         return 0
     fi
 
-    if check_roblox_log_for_disconnect; then
+    # Bug 1: Check window visibility in game
+    if [ "${WINDOW_REOPEN_ENABLED:-true}" = "true" ] && declare -F check_roblox_window_visible >/dev/null 2>&1; then
+        if ! check_roblox_window_visible; then
+            WINDOW_MISSING_COUNT=$((WINDOW_MISSING_COUNT + 1))
+            log_event WARN window_missing "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" count "$WINDOW_MISSING_COUNT" threshold "$WINDOW_MISSING_THRESHOLD"
+            log_msg "${YLW}[WINDOW]${NC} Không thấy cửa sổ Roblox khi đang chơi ($WINDOW_MISSING_COUNT/$WINDOW_MISSING_THRESHOLD)..."
+            if [ "$WINDOW_MISSING_COUNT" -ge "$WINDOW_MISSING_THRESHOLD" ]; then
+                log_msg "${RED}[WINDOW]${NC} Cửa sổ Roblox bị đóng! Tự động mở lại game..."
+                log_event WARN window_closed_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
+                send_discord "🪟 **[$ROBLOX_PACKAGE]** Cửa sổ Roblox bị đóng. Đang tự động mở lại..."
+                WINDOW_MISSING_COUNT=0
+                monitor_request_recovery "window_closed" "true"
+                return 0
+            fi
+            return 0
+        else
+            WINDOW_MISSING_COUNT=0
+        fi
+    fi
+
+    if monitor_disconnect_detected; then
         monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
         return 0
     fi
@@ -228,12 +310,14 @@ monitor_handle_in_game() {
 
     now="$(monitor_now)"
     if ! is_in_game; then
+        LOADING_STARTED_AT="$now"
         monitor_transition "$MONITOR_STATE_LOADING" "game_activity_missing"
         return 0
     fi
 
     monitor_note_stable_game "$now"
     LAST_IN_GAME="$now"
+    WINDOW_MISSING_COUNT=0
     if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
         log_msg "${GRN}[GAME]${NC} Đã vào game thành công! Reset bộ đếm sảnh."
         LOBBY_RETRY_COUNT=0
@@ -302,10 +386,11 @@ monitor_handle_recovering() {
 
     log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
     android_force_stop "$ROBLOX_PACKAGE" >/dev/null 2>&1
-    monitor_sleep 3
+    monitor_sleep "${LOBBY_RETRY_DELAY:-3}"
     [ "$count_rejoin" = "true" ] && inc_rejoin_count "$ROBLOX_PACKAGE"
-    LOBBY_RETRY_COUNT=0
     STABLE_SINCE=0
+    WINDOW_MISSING_COUNT=0
+    # Note: LOBBY_RETRY_COUNT & LOW_SERVER_RETRY_OFFSET are preserved across recoveries until confirmed gameplay!
     monitor_launch_once "$reason" || return 0
 }
 

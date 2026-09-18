@@ -47,6 +47,7 @@ export function AdminLayout({ activePage = "dashboard", onNavigate, onOpenCreate
     {
       group: "THƯƠNG MẠI & THANH TOÁN",
       items: [
+        { id: "products", label: "Sản Phẩm & Kho Key", icon: Layers, badge: "Commerce" },
         { id: "payos", label: "Cổng Thanh Toán PayOS", icon: CreditCard, badge: "Auto" },
         { id: "pricing", label: "Bảng Giá & Gói Cước", icon: Sliders }
       ]

@@ -135,6 +135,17 @@ export class LicenseRepository {
     );
   }
 
+  async revokeAllDevicesForLicense(licenseId) {
+    await this.pool.execute(
+      "UPDATE license_devices SET revoked_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE license_id = ? AND revoked_at IS NULL",
+      [licenseId]
+    );
+    await this.pool.execute(
+      "UPDATE license_tokens SET revoked_at = UTC_TIMESTAMP() WHERE license_id = ? AND revoked_at IS NULL",
+      [licenseId]
+    );
+  }
+
   async insertEvent(fields) {
     await this.pool.execute(
       `INSERT INTO license_events

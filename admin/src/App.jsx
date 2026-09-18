@@ -12,6 +12,7 @@ import { CustomerPortalPage } from "./pages/CustomerPortalPage.jsx";
 import { ApiManagementPage } from "./pages/ApiManagementPage.jsx";
 import { MarketingAdsPage } from "./pages/MarketingAdsPage.jsx";
 import { PayOSManagementPage } from "./pages/PayOSManagementPage.jsx";
+import { ProductManagementPage } from "./pages/ProductManagementPage.jsx";
 import { InteractiveShaderBackground } from "./components/InteractiveShaderBackground.jsx";
 
 export function App() {
@@ -106,6 +107,8 @@ export function App() {
           />
         ) : activeAdminPage === "licenses" ? (
           <LicensesPage onSelectLicense={(id) => setSelectedLicenseId(id)} />
+        ) : activeAdminPage === "products" ? (
+          <ProductManagementPage />
         ) : activeAdminPage === "payos" ? (
           <PayOSManagementPage />
         ) : activeAdminPage === "pricing" ? (

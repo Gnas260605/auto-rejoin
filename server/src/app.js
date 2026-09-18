@@ -20,10 +20,14 @@ import { PaymentRepository } from "./repositories/payment.repository.js";
 import { PaymentService } from "./services/payment.service.js";
 import { PaymentController } from "./controllers/payment.controller.js";
 import { createPaymentRouter } from "./routes/payment.routes.js";
+import { CommerceRepository } from "./repositories/commerce.repository.js";
+import { CommerceService } from "./services/commerce.service.js";
+import { CommerceController } from "./controllers/commerce.controller.js";
+import { createCommerceRouter, createCommerceAdminRouter } from "./routes/commerce.routes.js";
 import { errorMiddleware, notFoundMiddleware } from "./middleware/error.middleware.js";
 import { isoNow } from "./utils/time.js";
 
-export function createApp({ repository, adminRepository, paymentRepository, config = env } = {}) {
+export function createApp({ repository, adminRepository, paymentRepository, commerceRepository, config = env } = {}) {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -49,10 +53,11 @@ export function createApp({ repository, adminRepository, paymentRepository, conf
     next();
   });
 
-  const pool = (!repository || !adminRepository || !paymentRepository) ? getPool() : null;
+  const pool = (!repository || !adminRepository || !paymentRepository || !commerceRepository) ? getPool() : null;
   const licRepo = repository || new LicenseRepository(pool);
   const admRepo = adminRepository || new AdminRepository(pool);
   const payRepo = paymentRepository || new PaymentRepository(pool);
+  const comRepo = commerceRepository || new CommerceRepository(pool);
 
   const licService = new LicenseService({ repository: licRepo, config });
   const licController = new LicenseController(licService);
@@ -71,6 +76,14 @@ export function createApp({ repository, adminRepository, paymentRepository, conf
   });
   const payController = new PaymentController(payService);
 
+  const comService = new CommerceService({
+    commerceRepository: comRepo,
+    licenseRepository: licRepo,
+    paymentRepository: payRepo,
+    config
+  });
+  const comController = new CommerceController(comService);
+
   app.get("/api/v1/health", async (_req, res, next) => {
     try {
       if (!repository) {
@@ -84,11 +97,20 @@ export function createApp({ repository, adminRepository, paymentRepository, conf
 
   app.use("/api/v1", createLicenseRouter({ controller: licController, rateLimits: licRateLimits }));
   app.use("/api/v1", createPaymentRouter({ controller: payController, rateLimits: licRateLimits }));
+  app.use("/api/v1", createCommerceRouter({ controller: comController, rateLimits: licRateLimits }));
   app.use(
     "/api/v1/admin",
     createAdminRouter({
       controller: admController,
       paymentController: payController,
+      authMiddleware: admAuthMiddleware,
+      rateLimits: admRateLimits
+    })
+  );
+  app.use(
+    "/api/v1/admin/commerce",
+    createCommerceAdminRouter({
+      controller: comController,
       authMiddleware: admAuthMiddleware,
       rateLimits: admRateLimits
     })
@@ -99,4 +121,3 @@ export function createApp({ repository, adminRepository, paymentRepository, conf
 
   return app;
 }
-

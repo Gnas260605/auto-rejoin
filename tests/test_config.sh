@@ -25,6 +25,7 @@ reset_config_vars() {
     unset LICENSE_MODE AUTO_REJOIN_LICENSE_MODE
     unset JOIN_LOW_SERVER LOW_SERVER_MIN_PLAYERS LOW_SERVER_MAX_PLAYERS LOW_SERVER_STRICT
     unset ALLOW_UNSCOPED_DEEPLINK ALLOW_HOME_FALLBACK
+    unset WINDOW_MISSING_THRESHOLD WINDOW_REOPEN_ENABLED LOBBY_RETRY_LIMIT LOBBY_RETRY_DELAY
     CONFIG_WARNINGS=""
 }
 
@@ -95,7 +96,11 @@ valid_config() {
         'LICENSE_MODE=required' \
         'LOW_SERVER_STRICT=true' \
         'ALLOW_UNSCOPED_DEEPLINK=false' \
-        'ALLOW_HOME_FALLBACK=false'
+        'ALLOW_HOME_FALLBACK=false' \
+        'WINDOW_MISSING_THRESHOLD=5' \
+        'WINDOW_REOPEN_ENABLED=true' \
+        'LOBBY_RETRY_LIMIT=4' \
+        'LOBBY_RETRY_DELAY=5'
 
     run_load "$cfg"
     assert_status "valid config status" 0 "$?"
@@ -106,6 +111,10 @@ valid_config() {
     assert_eq "valid config low strict" "true" "$LOW_SERVER_STRICT"
     assert_eq "valid config unscoped fallback" "false" "$ALLOW_UNSCOPED_DEEPLINK"
     assert_eq "valid config home fallback" "false" "$ALLOW_HOME_FALLBACK"
+    assert_eq "valid config window threshold" "5" "$WINDOW_MISSING_THRESHOLD"
+    assert_eq "valid config window reopen" "true" "$WINDOW_REOPEN_ENABLED"
+    assert_eq "valid config lobby retry limit" "4" "$LOBBY_RETRY_LIMIT"
+    assert_eq "valid config lobby retry delay" "5" "$LOBBY_RETRY_DELAY"
 }
 
 quoted_values() {
@@ -212,6 +221,10 @@ missing_config_uses_defaults() {
     assert_eq "default low strict" "false" "$LOW_SERVER_STRICT"
     assert_eq "default unscoped fallback" "false" "$ALLOW_UNSCOPED_DEEPLINK"
     assert_eq "default home fallback" "false" "$ALLOW_HOME_FALLBACK"
+    assert_eq "default window threshold" "3" "$WINDOW_MISSING_THRESHOLD"
+    assert_eq "default window reopen" "true" "$WINDOW_REOPEN_ENABLED"
+    assert_eq "default lobby retry limit" "3" "$LOBBY_RETRY_LIMIT"
+    assert_eq "default lobby retry delay" "3" "$LOBBY_RETRY_DELAY"
 }
 
 save_and_reload() {

@@ -572,7 +572,8 @@ launch_roblox() {
     LAST_RESTART=$(date +%s)
     LAST_AFK_TAP=$(date +%s)
     LAST_LAUNCH=$(date +%s)
-    LAST_IN_GAME=$(date +%s)
+    LOADING_STARTED_AT=$(date +%s)
+    WINDOW_MISSING_COUNT=0
     TAP_ON_LOAD_DONE=false
     log_msg "${GRN}[LAUNCH]${NC} Đã gửi lệnh mở game. Chờ ${LAUNCH_GRACE}s trước khi giám sát..."
 }
@@ -583,9 +584,7 @@ check_internet() {
     network_is_online
 }
 
-# ── Kiểm tra Roblox đang chạy (đa phương thức) ───────────
-# ps -A KHÔNG thấy process khác user trên UGPhone không root.
-# Dùng dumpsys activity / dumpsys window thay thế.
+# ── Kiểm tra Roblox process đang chạy ───────────────────
 is_roblox_running() {
     local pkg="$ROBLOX_PACKAGE"
 
@@ -605,84 +604,156 @@ is_roblox_running() {
         if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
             grep -q "$pkg" "${TMP_DIR}/roblox_windows.txt" && return 0
         fi
-        # Fallback check nhanh không cần dumpsys
-        android_pgrep_package "$pkg" > /dev/null 2>&1 && return 0
-        local ps_out
-        ps_out=$(android_ps -A 2>/dev/null)
-        [ -z "$ps_out" ] && ps_out=$(android_ps 2>/dev/null)
-        echo "$ps_out" | grep -q "$pkg" && return 0
+        android_is_process_running "$pkg" 2>/dev/null && return 0
         return 1
     fi
 
-    # 2. Phương thức trực tiếp (pgrep nhẹ nhất check trước)
-    android_pgrep_package "$pkg" > /dev/null 2>&1 && return 0
+    android_is_process_running "$pkg"
+}
 
-    local act_out
-    act_out=$(android_dumpsys activity activities 2>/dev/null)
-    if [ -n "$act_out" ]; then
-        echo "$act_out" | grep -q "$pkg" && return 0
+# ── Kiểm tra task/activity stack của Roblox ──────────────
+check_roblox_task_present() {
+    local pkg="$ROBLOX_PACKAGE"
+    android_is_task_present "$pkg"
+}
+
+# ── Kiểm tra cửa sổ UI của Roblox có đang hiển thị ───────
+check_roblox_window_visible() {
+    local pkg="$ROBLOX_PACKAGE"
+
+    # 1. Check qua shared snapshot nếu còn mới
+    if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
+        local mtime now
+        mtime=$(stat -c %Y "${TMP_DIR}/roblox_windows.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_windows.txt" 2>/dev/null)
+        now=$(date +%s)
+        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 30 ]; then
+            grep -qi "$pkg" "${TMP_DIR}/roblox_windows.txt" && return 0
+        fi
     fi
 
-    local win_out
-    win_out=$(android_dumpsys window windows 2>/dev/null)
-    if [ -n "$win_out" ]; then
-        echo "$win_out" | grep -q "$pkg" && return 0
-    fi
-
-    local pkg_out
-    pkg_out=$(android_dumpsys package "$pkg" 2>/dev/null | grep -i 'proc\|pid')
-    if echo "$pkg_out" | grep -qi 'foreground\|perceptible\|visible'; then
+    # 2. Check window visible qua dumpsys
+    if android_is_window_visible "$pkg" 2>/dev/null; then
         return 0
     fi
 
-    local ps_out
-    ps_out=$(android_ps -A 2>/dev/null)
-    [ -z "$ps_out" ] && ps_out=$(android_ps 2>/dev/null)
-    echo "$ps_out" | grep -q "$pkg" && return 0
+    # 3. Fallback check task stack
+    if check_roblox_task_present 2>/dev/null; then
+        return 0
+    fi
 
     return 1
 }
 
-# ── Kiểm tra xem Roblox đã vào gameplay map chưa (GameActivity / MainActivity) ──
+# ── Kiểm tra log xem có session game đang active không ────
+check_roblox_log_for_game_session() {
+    local pkg="$ROBLOX_PACKAGE"
+    local expected_place="$PLACE_ID"
+    local log_dir=""
+
+    if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
+        log_dir="/sdcard/Android/data/$pkg/files/logs"
+    elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
+        log_dir="/data/data/$pkg/files/logs"
+    fi
+
+    [ -z "$log_dir" ] && return 1
+
+    local latest_log
+    latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '\r\n')
+    [ -z "$latest_log" ] && return 1
+
+    local mtime
+    mtime=$(android_stat_mtime "$log_dir/$latest_log" 2>/dev/null | tr -d '\r\n')
+    local now; now=$(date +%s)
+    if [ -n "$mtime" ] && [ "$((now - mtime))" -gt 300 ]; then
+        return 1
+    fi
+
+    local log_tail
+    log_tail=$(android_tail_lines 80 "$log_dir/$latest_log" 2>/dev/null)
+    [ -z "$log_tail" ] && return 1
+
+    # Kiểm tra Place ID hoặc dấu hiệu kết nối game server thành công
+    if echo "$log_tail" | grep -E -q "placeId[^0-9]{0,12}${expected_place}|Joining game|Connected to game server|Game joined successfully|Replication stream connected|UniverseId"; then
+        if ! echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|you have been kicked"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# ── Phát hiện trạng thái phiên Roblox chi tiết ───────────
+# APP_HOME | JOINING | QUEUE | LOADING_GAME | GAME_ACTIVE | WINDOW_CLOSED
+detect_roblox_session_state() {
+    local pkg="$ROBLOX_PACKAGE"
+
+    if ! is_roblox_running; then
+        echo "WINDOW_CLOSED"
+        return 0
+    fi
+
+    if ! check_roblox_window_visible; then
+        echo "WINDOW_CLOSED"
+        return 0
+    fi
+
+    local resumed
+    resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
+
+    if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|RobloxActivity"; then
+        echo "GAME_ACTIVE"
+        return 0
+    fi
+
+    if check_roblox_log_for_game_session; then
+        echo "GAME_ACTIVE"
+        return 0
+    fi
+
+    if echo "$resumed" | grep -qiE "MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
+        echo "APP_HOME"
+        return 0
+    fi
+
+    if echo "$resumed" | grep -qiE "ActivityProtocolUrlDispatch|LoadingActivity|SplashActivity"; then
+        echo "LOADING_GAME"
+        return 0
+    fi
+
+    echo "JOINING"
+}
+
+# ── Kiểm tra xem Roblox đã vào gameplay map chưa ─────────
 is_in_game() {
     local pkg="$ROBLOX_PACKAGE"
 
-    # 1. Thử dùng file status dùng chung (nếu mới và tồn tại) để tránh gọi dumpsys trực tiếp
-    local use_shared=false
+    # 1. Process phải đang chạy
+    if ! is_roblox_running; then
+        return 1
+    fi
+
+    # 2. Window/task phải tồn tại và đang hiển thị
+    if ! check_roblox_window_visible; then
+        return 1
+    fi
+
+    # 3. Phải xác nhận đúng GameActivity/NativeActivity hoặc log session
+    local resumed
+    resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
+
+    if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|RobloxActivity"; then
+        return 0
+    fi
+
+    # 4. Kiểm tra qua log file game session
+    if check_roblox_log_for_game_session; then
+        return 0
+    fi
+
+    # 5. Shared cache fallback (nếu có dumpsys snapshot)
     if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
-        local mtime
-        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
-        local now; now=$(date +%s)
-        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
-            use_shared=true
-        fi
-    fi
-
-    if [ "$use_shared" = "true" ]; then
-        grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
-        if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
-            grep -i "$pkg" "${TMP_DIR}/roblox_windows.txt" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
-        fi
-    fi
-
-    # 2. Phương thức trực tiếp qua dumpsys nếu khả dụng
-    local act_out
-    act_out=$(android_dumpsys activity activities 2>/dev/null)
-    if [ -n "$act_out" ]; then
-        echo "$act_out" | grep -i "$pkg" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
-    fi
-
-    local win_out
-    win_out=$(android_dumpsys window windows 2>/dev/null)
-    if [ -n "$win_out" ]; then
-        echo "$win_out" | grep -i "$pkg" | grep -qiE "GameActivity|MainActivity|RobloxActivity|NativeActivity|Activity" && return 0
-    fi
-
-    # 3. Fallback cho chế độ direct / mod APK (khi dumpsys không có quyền hoặc bị chặn):
-    # Nếu process đang sống và đã qua thời gian khởi động (LAUNCH_GRACE), coi là đang chạy ổn định trong game
-    if is_roblox_running; then
-        local now; now=$(date +%s)
-        if [ $((now - ${LAST_LAUNCH:-0})) -ge ${LAUNCH_GRACE:-30} ]; then
+        if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|NativeActivity|RobloxActivity"; then
             return 0
         fi
     fi

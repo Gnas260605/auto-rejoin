@@ -136,6 +136,107 @@ android_monkey_package() {
     android_exec monkey -p "$package" 1
 }
 
+android_is_process_running() {
+    local package="$1"
+    android_validate_package "$package" || return 2
+
+    local pids
+    pids="$(android_pidof "$package" 2>/dev/null)"
+    if [ -n "$pids" ]; then
+        return 0
+    fi
+
+    if android_pgrep_package "$package" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local ps_out
+    ps_out="$(android_ps -A 2>/dev/null)"
+    [ -z "$ps_out" ] && ps_out="$(android_ps 2>/dev/null)"
+    if [ -n "$ps_out" ] && echo "$ps_out" | grep -q "[[:space:]]${package}$\|[[:space:]]${package}[[:space:]]"; then
+        return 0
+    fi
+
+    return 1
+}
+
+android_is_task_present() {
+    local package="$1"
+    android_validate_package "$package" || return 2
+
+    local dump
+    dump="$(android_dumpsys activity activities 2>/dev/null)"
+    if [ -n "$dump" ]; then
+        if echo "$dump" | grep -E -q "Task\{.*${package}|realActivity=.*${package}|ActivityRecord\{.*${package}|affinity=.*${package}"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    dump="$(android_dumpsys activity recents 2>/dev/null)"
+    if [ -n "$dump" ] && echo "$dump" | grep -q "$package"; then
+        return 0
+    fi
+
+    dump="$(android_dumpsys activity top 2>/dev/null)"
+    if [ -n "$dump" ] && echo "$dump" | grep -q "$package"; then
+        return 0
+    fi
+
+    return 1
+}
+
+android_is_window_visible() {
+    local package="$1"
+    android_validate_package "$package" || return 2
+
+    local win_out
+    win_out="$(android_dumpsys window windows 2>/dev/null)"
+    if [ -n "$win_out" ]; then
+        if echo "$win_out" | grep -E -q "Window\{.*${package}|mCurrentFocus=.*${package}|mFocusedApp=.*${package}|mSurface=.*${package}"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    local act_out
+    act_out="$(android_dumpsys activity top 2>/dev/null)"
+    if [ -n "$act_out" ]; then
+        if echo "$act_out" | grep -E -q "ActivityRecord\{.*${package}|mResumedActivity:.*${package}|mResumed=true.*${package}|Task\{.*${package}"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    return 1
+}
+
+android_get_resumed_activity() {
+    local package="$1"
+    local dump comp
+    android_validate_package "$package" || return 2
+
+    dump="$(android_dumpsys activity top 2>/dev/null)"
+    if [ -n "$dump" ]; then
+        comp="$(echo "$dump" | grep -oE "${package}/[A-Za-z0-9_.]+" | head -n 1)"
+        if [ -n "$comp" ]; then
+            printf '%s\n' "$comp"
+            return 0
+        fi
+    fi
+
+    dump="$(android_dumpsys activity activities 2>/dev/null)"
+    if [ -n "$dump" ]; then
+        comp="$(echo "$dump" | grep -E "mResumedActivity|topResumedActivity|ResumedActivity" | grep -oE "${package}/[A-Za-z0-9_.]+" | head -n 1)"
+        if [ -n "$comp" ]; then
+            printf '%s\n' "$comp"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 android_validate_uint() {
     local value="$1"
     local max="${2:-100000}"

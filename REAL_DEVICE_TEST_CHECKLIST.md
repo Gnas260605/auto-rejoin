@@ -187,3 +187,96 @@ bin/roblox-manager support-bundle
 - [ ] NOT TESTED - Discord webhook tokens, passwords, and JWT tokens are fully redacted.
 - [ ] NOT TESTED - License key is masked as `AR-XXXX-XXXX-XXXX-XXXX` and installation ID is masked.
 
+---
+
+## 8. Real-Device Window & Lobby Recovery Validation (Bug 1 & Bug 2)
+
+### Case 8.1: Freeform Window Close & Auto-Reopen (Bug 1)
+**Objective**: Verify that closing the freeform/tab/window of Roblox (while the background process remains alive) is detected and automatically relaunched with the configured Place ID and window bounds.
+
+```bash
+# 1. Start the bot on UGPhone
+./auto_rejoin.sh monitor "com.roblox.client"
+
+# 2. Wait until bot launches Roblox and status shows IN_GAME
+# 3. Manually click the 'X' button to close only the Roblox Freeform window
+#    (Do NOT kill the background process).
+# 4. Observe the bot log:
+#    - Ticks 1 to 2: logs [WINDOW] Không thấy cửa sổ Roblox (1/3)...
+#    - Tick 3: logs [WINDOW] Cửa sổ Roblox bị đóng! Tự động mở lại game...
+#    - Event: window_closed_detected
+#    - Bot executes force-stop on stale background process and relaunches Roblox deep-link.
+```
+- [ ] NOT TESTED - Closing Freeform window while process stays alive is detected within `WINDOW_MISSING_THRESHOLD` ticks (default: 3).
+- [ ] NOT TESTED - Stale background Roblox process is cleanly terminated.
+- [ ] NOT TESTED - Bot automatically relaunches the EXACT configured package (`ROBLOX_PACKAGE`).
+- [ ] NOT TESTED - Bot enters the configured `PLACE_ID` (and restores freeform layout bounds if configured).
+- [ ] NOT TESTED - State transitions: `IN_GAME` ➔ `RECOVERING (window_closed)` ➔ `LOADING` ➔ `IN_GAME`.
+
+---
+
+### Case 8.2: Roblox Stuck in Home/Lobby Auto-Rejoin (Bug 2)
+**Objective**: Verify that when Roblox opens into the Home/Lobby screen instead of directly joining the game, the bot recognizes it is NOT in gameplay and re-triggers the deep-link.
+
+```bash
+# 1. Configure a test experience
+# 2. Start monitor
+./auto_rejoin.sh monitor "com.roblox.client"
+
+# 3. While Roblox is loading or in-game, click the Roblox TopBar Home icon or 'Leave' to return to Home/Lobby.
+# 4. Observe the bot log:
+#    - Bot recognizes Home screen (MainActivity / no GameActivity / no game session log)
+#    - State remains in LOADING (not falsely classified as IN_GAME)
+#    - Log shows: [LOBBY] Đang ở sảnh/loading, chờ vào map...
+#    - When time_stuck >= IN_GAME_TIMEOUT (or 120s):
+#      * [LOBBY] Kẹt ở sảnh/loading 120s! Force-stop rồi chọn lại server... (Lần thử 1/3)
+#      * Event: lobby_timeout, lobby_retry (retry=1)
+#      * Bot triggers deep-link rejoin.
+# 5. Verify LOBBY_RETRY_COUNT increments (1 -> 2 -> 3) across retries without resetting prematurely.
+# 6. Once account successfully enters game, verify LOBBY_RETRY_COUNT resets to 0.
+```
+- [ ] NOT TESTED - Roblox Home/Lobby screen is never classified as `IN_GAME`.
+- [ ] NOT TESTED - `time_stuck` is accurately tracked from `LOADING_STARTED_AT`.
+- [ ] NOT TESTED - After `IN_GAME_TIMEOUT`, bot automatically deep-links back into the target game.
+- [ ] NOT TESTED - `LOBBY_RETRY_COUNT` and `LOW_SERVER_RETRY_OFFSET` are preserved across recoveries until confirmed gameplay.
+- [ ] NOT TESTED - Upon confirmed gameplay (`GameActivity` + session evidence), retry counters reset to 0.
+
+---
+
+### Case 8.3: Multiple Roblox Clones Simultaneous Isolation
+**Objective**: Verify that closing or disconnecting one clone does not affect or reopen other running clones.
+
+```bash
+# Setup: 2 clones installed: com.roblox.client and com.roblox.client_clone1
+# 1. Start monitor for Clone 1 in tmux window 1:
+CONFIG_FILE="configs/acc1.cfg" ./auto_rejoin.sh monitor "com.roblox.client"
+
+# 2. Start monitor for Clone 2 in tmux window 2:
+CONFIG_FILE="configs/acc2.cfg" ./auto_rejoin.sh monitor "com.roblox.client_clone1"
+
+# 3. Both clones reach IN_GAME.
+# 4. Manually close the window of Clone 1 only.
+# 5. Observe:
+#    - Clone 1 detects missing window and relaunches com.roblox.client.
+#    - Clone 2 remains completely untouched and stays IN_GAME.
+```
+- [ ] NOT TESTED - Closing Clone 1 window only triggers recovery for Clone 1 (`com.roblox.client`).
+- [ ] NOT TESTED - Clone 2 (`com.roblox.client_clone1`) continues undisturbed in `IN_GAME`.
+- [ ] NOT TESTED - Each clone's lock file and PID file operate independently without conflict.
+
+---
+
+### Case 8.4: Low Server Job ID Rotation on Lobby Stuck
+**Objective**: Verify that if `JOIN_LOW_SERVER=true` and lobby recovery occurs, the bot rotates to the next low-player server offset.
+
+```bash
+# 1. Enable JOIN_LOW_SERVER=true in config
+# 2. Run bot and simulate lobby stuck
+# 3. Verify retry 1 uses offset 1 (next smallest server Job ID)
+# 4. Verify retry 2 uses offset 2
+```
+- [ ] NOT TESTED - `LOW_SERVER_RETRY_OFFSET` increments with each lobby retry.
+- [ ] NOT TESTED - Different server Job ID is targeted on each retry attempt.
+- [ ] NOT TESTED - Offset resets to 0 upon entering `GAME_ACTIVE`.
+
+

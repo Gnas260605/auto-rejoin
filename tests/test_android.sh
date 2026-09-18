@@ -211,6 +211,62 @@ direct_install_downgrade_flag() {
     assert_eq "direct install downgrade args" "$(printf 'pm argc=4\npm arg1=install\npm arg2=-r\npm arg3=-d\npm arg4=%s' "$apk")" "$(cat "$LOG_FILE")"
 }
 
+test_process_running_detection() {
+    reset_log
+    write_fake pidof '#!/usr/bin/env bash' 'if [ "$1" = "com.roblox.client" ]; then echo 1234; exit 0; else exit 1; fi'
+    write_fake pgrep '#!/usr/bin/env bash' 'if [ "$2" = "com.roblox.client" ]; then echo 1234; exit 0; else exit 1; fi'
+    write_fake ps '#!/usr/bin/env bash' 'echo "u0_a123 1234 567 12345 6789 0 0 S com.roblox.client"'
+
+    ANDROID_EXECUTOR=direct android_is_process_running "com.roblox.client"
+    assert_status "is_process_running returns 0 for running package" 0 "$?"
+
+    ANDROID_EXECUTOR=direct android_is_process_running "com.roblox.nonexistent"
+    assert_status "is_process_running returns 1 for missing package" 1 "$?"
+}
+
+test_task_present_detection() {
+    reset_log
+    write_fake dumpsys '#!/usr/bin/env bash' \
+        'if [ "$1" = "activity" ] && [ "$2" = "activities" ]; then' \
+        '  echo "  Task{123 #1 A=com.roblox.client U=0 StackId=1 sz=1}"' \
+        '  echo "    ActivityRecord{abc u0 com.roblox.client/.MainActivity t123}"' \
+        'fi'
+
+    ANDROID_EXECUTOR=direct android_is_task_present "com.roblox.client"
+    assert_status "is_task_present returns 0 when task exists" 0 "$?"
+
+    ANDROID_EXECUTOR=direct android_is_task_present "com.roblox.other"
+    assert_status "is_task_present returns 1 when task missing" 1 "$?"
+}
+
+test_window_visible_detection() {
+    reset_log
+    write_fake dumpsys '#!/usr/bin/env bash' \
+        'if [ "$1" = "window" ] && [ "$2" = "windows" ]; then' \
+        '  echo "  Window{abc u0 com.roblox.client/com.roblox.client.GameActivity}:"' \
+        '  echo "    mCurrentFocus=Window{abc u0 com.roblox.client/com.roblox.client.GameActivity}"' \
+        'fi'
+
+    ANDROID_EXECUTOR=direct android_is_window_visible "com.roblox.client"
+    assert_status "is_window_visible returns 0 when window present" 0 "$?"
+
+    ANDROID_EXECUTOR=direct android_is_window_visible "com.roblox.other"
+    assert_status "is_window_visible returns 1 when window absent" 1 "$?"
+}
+
+test_get_resumed_activity_detection() {
+    reset_log
+    write_fake dumpsys '#!/usr/bin/env bash' \
+        'if [ "$1" = "activity" ] && [ "$2" = "top" ]; then' \
+        '  echo "  ACTIVITY com.roblox.client/com.roblox.client.GameActivity 12345 pid=1234"' \
+        'fi'
+
+    local resumed
+    resumed="$(ANDROID_EXECUTOR=direct android_get_resumed_activity "com.roblox.client")"
+    assert_status "get_resumed_activity status" 0 "$?"
+    assert_eq "get_resumed_activity returns GameActivity" "com.roblox.client/com.roblox.client.GameActivity" "$resumed"
+}
+
 setup_fakes
 direct_force_stop
 direct_start_uri_keeps_ampersand_argument
@@ -224,6 +280,10 @@ backticks_uri_not_executed
 spaces_metacharacters_stay_in_uri_argument
 package_version_read
 direct_install_downgrade_flag
+test_process_running_detection
+test_task_present_detection
+test_window_visible_detection
+test_get_resumed_activity_detection
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]
