@@ -84,9 +84,9 @@ status=$?
 assert_status "setup multi public succeeds" 0 "$status"
 
 assert_file_contains "primary clone low server enabled" "${TEST_TMP}/config_com.roblox.client.cfg" "JOIN_LOW_SERVER=true"
-assert_file_contains "primary clone strict enabled" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_STRICT=true"
+assert_file_contains "primary clone strict defaults fail-open" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_STRICT=false"
 assert_file_contains "second clone low server enabled" "${TEST_TMP}/config_aya.clone.one.cfg" "JOIN_LOW_SERVER=true"
-assert_file_contains "second clone strict enabled" "${TEST_TMP}/config_aya.clone.one.cfg" "LOW_SERVER_STRICT=true"
+assert_file_contains "second clone strict defaults fail-open" "${TEST_TMP}/config_aya.clone.one.cfg" "LOW_SERVER_STRICT=false"
 
 (
     cd "$TEST_TMP" || exit 1
@@ -96,6 +96,15 @@ assert_file_contains "second clone strict enabled" "${TEST_TMP}/config_aya.clone
 status=$?
 assert_status "setup explicit low server override succeeds" 0 "$status"
 assert_file_contains "explicit override keeps low server disabled" "${TEST_TMP}/config_com.roblox.client.cfg" "JOIN_LOW_SERVER=false"
+
+(
+    cd "$TEST_TMP" || exit 1
+    rm -f config_*.cfg
+    PATH="./fakebin:${PATH}" AUTO_REJOIN_PARENT=true AUTO_REJOIN_LOW_SERVER_STRICT=true bash setup.sh 123456 >/dev/null 2>&1
+)
+status=$?
+assert_status "setup explicit strict override succeeds" 0 "$status"
+assert_file_contains "explicit strict override respected" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_STRICT=true"
 
 echo ""
 echo "Setup Low Server Default Tests: PASS=$PASS_COUNT, FAIL=$FAIL_COUNT"
