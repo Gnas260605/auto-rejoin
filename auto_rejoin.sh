@@ -811,17 +811,12 @@ launch_roblox() {
                     return 1
                 }
             else
-                if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
-                    log_msg "${RED}[LOW_SERVER]${NC} Khong tim duoc server it nguoi/API bi rate-limit; strict mode se khong mo matchmaking mac dinh."
-                    log_event WARN low_server_strict_blocked "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                log_msg "${YLW}[LOW_SERVER]${NC} Không tìm được server <=${max_p} người hoặc API bận; tự động vào server mặc định."
+                log_event WARN low_server_fallback "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
                     return 1
-                else
-                    log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
-                    link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                        log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                        return 1
-                    }
-                fi
+                }
             fi
         fi
     else
