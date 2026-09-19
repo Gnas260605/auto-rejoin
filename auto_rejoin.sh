@@ -1029,35 +1029,31 @@ is_in_game() {
         return 1
     fi
 
-    local resumed
-    resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
-
-    # 2. Session Continuity / Executor Overlay Latch:
-    # Nếu đã từng vào game thành công (LAST_IN_GAME > 0), process còn sống,
-    # không bị văng về Home/MainActivity và không có disconnect log -> LUÔN DUY TRÌ IN_GAME
-    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
-        if ! echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
-            if ! check_roblox_log_for_disconnect; then
-                return 0
-            fi
-        fi
-    fi
-
-    # 3. Window/task phải tồn tại
-    if ! check_roblox_window_visible && ! check_roblox_task_present; then
+    # 2. Không được có log ngắt kết nối / kick thực sự
+    if check_roblox_log_for_disconnect; then
         return 1
     fi
 
-    # 4. Phải xác nhận đúng GameActivity/NativeActivity hoặc log session
+    local resumed
+    resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
+
+    # 3. Tuyệt đối không ở màn hình Home / MainActivity
     if echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
         return 1
     fi
 
+    # 4. Session Continuity Latch:
+    # Nếu đã từng vào game (LAST_IN_GAME > 0), process còn chạy, không về Home, không disconnect
+    # -> LUÔN LÀ IN_GAME (Bảo vệ tuyệt đối tab đang chơi / auto-farm / freeform / mở hack)
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
+        return 0
+    fi
+
+    # 5. Khi mới nạp game: kiểm tra activity hoặc log session
     if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
         return 0
     fi
 
-    # 5. Kiểm tra qua log file game session
     if check_roblox_log_for_game_session; then
         return 0
     fi
@@ -1068,6 +1064,14 @@ is_in_game() {
             return 1
         fi
         if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
+            return 0
+        fi
+    fi
+
+    # 7. Fallback cho Freeform Clones: Task tồn tại, process sống và đã qua 15s kể từ khi mở
+    if check_roblox_task_present; then
+        local now; now=$(date +%s)
+        if [ "$((now - LAST_LAUNCH))" -ge 15 ]; then
             return 0
         fi
     fi
