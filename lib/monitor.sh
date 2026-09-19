@@ -84,6 +84,12 @@ monitor_recovery_is_authorized() {
     local reason="${1:-unspecified}"
     local session_state=""
 
+    # If the app has never reached in-game or failed during launch/startup, recovery is ALWAYS authorized
+    if [ "${LAST_IN_GAME:-0}" -eq 0 ] || [ "$reason" = "startup" ] || [ "$reason" = "launch_failed" ] || [ "$reason" = "wrong_place_detected" ]; then
+        MONITOR_RECOVERY_AUTHORIZED_BY="unconfirmed_startup"
+        return 0
+    fi
+
     monitor_poll_session_evidence
 
     if ! is_roblox_running; then
@@ -104,9 +110,14 @@ monitor_recovery_is_authorized() {
         fi
     fi
 
-    MONITOR_RECOVERY_AUTHORIZED_BY="active_session_protected"
-    log_event WARN recovery_cancelled "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason" gate_reason "$MONITOR_RECOVERY_AUTHORIZED_BY" last_in_game "${LAST_IN_GAME:-0}"
-    return 1
+    if is_in_game; then
+        MONITOR_RECOVERY_AUTHORIZED_BY="active_session_protected"
+        log_event WARN recovery_cancelled "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason" gate_reason "$MONITOR_RECOVERY_AUTHORIZED_BY" last_in_game "${LAST_IN_GAME:-0}"
+        return 1
+    fi
+
+    MONITOR_RECOVERY_AUTHORIZED_BY="not_in_game"
+    return 0
 }
 
 monitor_force_stop_package() {

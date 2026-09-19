@@ -865,17 +865,11 @@ launch_roblox() {
                     return 1
                 }
             else
-                if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
-                    log_msg "${RED}[LOW_SERVER]${NC} Không tìm được server riêng/ít người. Hủy launch lần này để tránh nhiều acc vào cùng server."
-                    log_event WARN low_server_unique_unavailable "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                log_msg "${YLW}[LOW_SERVER]${NC} Không có server 1 người trống; chuyển sang server thường để mở game ngay."
+                link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
                     return 1
-                else
-                    log_msg "${YLW}[LOW_SERVER]${NC} Không còn server trống riêng; tự động chuyển sang matchmaking thường để mở game."
-                    link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                        log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                        return 1
-                    }
-                fi
+                }
             fi
         fi
     else
