@@ -250,52 +250,94 @@ run_cmd() {
 }
 
 # ── Tự động quét username Roblox ─────────────────────────
-# Thử nhiều phương thức: root SharedPrefs → DB → files → config
+# Đa phương thức: Lua Companion file → Roblox Client Logs → SharedPrefs → SQLite → Config
 get_roblox_username() {
     local pkg="${1:-$ROBLOX_PACKAGE}"
     local uname=""
 
-    # ── Nếu có Root: thử đọc trực tiếp từ data app ──────
-    local has_root=false
-    [ "$(android_detect_executor)" = "su" ] && has_root=true
+    # 1. Đọc từ file do Lua Companion Script xuất ra (chính xác 100% khi game chạy)
+    local user_file_paths=(
+        "/sdcard/Android/data/$pkg/files/roblox_username.txt"
+        "/data/data/$pkg/files/roblox_username.txt"
+        "/sdcard/Delta/workspace/roblox_username.txt"
+        "/sdcard/Fluxus/workspace/roblox_username.txt"
+        "/sdcard/Codex/workspace/roblox_username.txt"
+        "/sdcard/Arceus/workspace/roblox_username.txt"
+        "/sdcard/Hydrogen/workspace/roblox_username.txt"
+    )
+    for ufp in "${user_file_paths[@]}"; do
+        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+')" ]; then
+            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+ ')
+            [ -n "$uname" ] && break
+        fi
+    done
 
-    if $has_root; then
-        # Cách 1: Đọc SharedPreferences XML (thường lưu tên acc ở đây)
-        uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
-            | grep -oP '(?<=value=")[^"]{3,40}' \
-            | grep -v '^[0-9]*$' \
-            | grep -v 'true\|false\|null' \
-            | head -1 2>/dev/null)
-
-        # Cách 2: Thử SQLite database Roblox
-        if [ -z "$uname" ]; then
-            local db_file
-            db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '\r')
-            if [ -n "$db_file" ]; then
-                uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
+    # 2. Đọc từ file Log Roblox (hoạt động kể cả không root)
+    if [ -z "$uname" ]; then
+        local log_dir=""
+        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
+')" ]; then
+            log_dir="/sdcard/Android/data/$pkg/files/logs"
+        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
+')" ]; then
+            log_dir="/data/data/$pkg/files/logs"
+        fi
+        if [ -n "$log_dir" ]; then
+            local latest_log
+            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
+')
+            if [ -n "$latest_log" ]; then
+                local log_sample
+                log_sample=$(android_tail_lines 300 "$log_dir/$latest_log" 2>/dev/null)
+                # 2.1: Bắt từ companion script tag
+                uname=$(echo "$log_sample" | grep -Eio '\[AUTO_REJOIN_USER\][[:space:]]*[A-Za-z0-9_]+' | head -n 1 | awk '{print $2}')
+                # 2.2: Bắt từ FLog::PlayerInfo hoặc UserName
+                if [ -z "$uname" ]; then
+                    uname=$(echo "$log_sample" | grep -Eio '(UserName|username)[:= ][[:space:]]*[A-Za-z0-9_]{3,30}' | head -n 1 | awk '{print $NF}' | tr -d '"')
+                fi
+                # 2.3: Bắt từ Connection accepted for player
+                if [ -z "$uname" ]; then
+                    uname=$(echo "$log_sample" | grep -Eio 'player[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*\([A-Za-z0-9_]+\)' | grep -oE '\([A-Za-z0-9_]+\)' | tr -d '()' | head -n 1)
+                fi
             fi
-        fi
-
-        # Cách 3: Tìm trong các file JSON ở cấp đầu của files/ (tránh đệ quy sâu vào thư mục cache)
-        if [ -z "$uname" ]; then
-            uname=$(android_app_grep_recursive "$pkg" files '"username"' 2>/dev/null \
-                | grep -oP '(?<="username":")[^"]{3,40}' \
-                | head -1 2>/dev/null)
-        fi
-
-        # Cách 4: Đọc account cache JSON nếu có (chỉ tìm trong thư mục files/ với maxdepth 2)
-        if [ -z "$uname" ]; then
-            local account_files account_file
-            account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
-            for account_file in $account_files; do
-                uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
-                    | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
-                [ -n "$uname" ] && break
-            done
         fi
     fi
 
-    # ── Fallback: đọc từ file config (đã nhập tay trước đó) ─
+    # 3. Nếu có Root: thử đọc trực tiếp từ SharedPreferences / SQLite / JSON
+    if [ -z "$uname" ]; then
+        local has_root=false
+        [ "$(android_detect_executor)" = "su" ] && has_root=true
+
+        if $has_root; then
+            uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
+                | grep -oP '(?<=value=")[^"]{3,40}' \
+                | grep -v '^[0-9]*$' \
+                | grep -v 'true\|false\|null' \
+                | head -1 2>/dev/null)
+
+            if [ -z "$uname" ]; then
+                local db_file
+                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '')
+                if [ -n "$db_file" ]; then
+                    uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
+                fi
+            fi
+
+            if [ -z "$uname" ]; then
+                local account_files account_file
+                account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
+                for account_file in $account_files; do
+                    uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
+                        | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
+                    [ -n "$uname" ] && break
+                done
+            fi
+        fi
+    fi
+
+    # 4. Fallback: đọc từ file config (đã nhập tay trước đó)
     if [ -z "$uname" ]; then
         local cfg="config_${pkg}.cfg"
         uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
@@ -445,52 +487,94 @@ run_cmd() {
 }
 
 # ── Tự động quét username Roblox ─────────────────────────
-# Thử nhiều phương thức: root SharedPrefs → DB → files → config
+# Đa phương thức: Lua Companion file → Roblox Client Logs → SharedPrefs → SQLite → Config
 get_roblox_username() {
     local pkg="${1:-$ROBLOX_PACKAGE}"
     local uname=""
 
-    # ── Nếu có Root: thử đọc trực tiếp từ data app ──────
-    local has_root=false
-    [ "$(android_detect_executor)" = "su" ] && has_root=true
+    # 1. Đọc từ file do Lua Companion Script xuất ra (chính xác 100% khi game chạy)
+    local user_file_paths=(
+        "/sdcard/Android/data/$pkg/files/roblox_username.txt"
+        "/data/data/$pkg/files/roblox_username.txt"
+        "/sdcard/Delta/workspace/roblox_username.txt"
+        "/sdcard/Fluxus/workspace/roblox_username.txt"
+        "/sdcard/Codex/workspace/roblox_username.txt"
+        "/sdcard/Arceus/workspace/roblox_username.txt"
+        "/sdcard/Hydrogen/workspace/roblox_username.txt"
+    )
+    for ufp in "${user_file_paths[@]}"; do
+        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+')" ]; then
+            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+ ')
+            [ -n "$uname" ] && break
+        fi
+    done
 
-    if $has_root; then
-        # Cách 1: Đọc SharedPreferences XML (thường lưu tên acc ở đây)
-        uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
-            | grep -oP '(?<=value=")[^"]{3,40}' \
-            | grep -v '^[0-9]*$' \
-            | grep -v 'true\|false\|null' \
-            | head -1 2>/dev/null)
-
-        # Cách 2: Thử SQLite database Roblox
-        if [ -z "$uname" ]; then
-            local db_file
-            db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '\r')
-            if [ -n "$db_file" ]; then
-                uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
+    # 2. Đọc từ file Log Roblox (hoạt động kể cả không root)
+    if [ -z "$uname" ]; then
+        local log_dir=""
+        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
+')" ]; then
+            log_dir="/sdcard/Android/data/$pkg/files/logs"
+        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
+')" ]; then
+            log_dir="/data/data/$pkg/files/logs"
+        fi
+        if [ -n "$log_dir" ]; then
+            local latest_log
+            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
+')
+            if [ -n "$latest_log" ]; then
+                local log_sample
+                log_sample=$(android_tail_lines 300 "$log_dir/$latest_log" 2>/dev/null)
+                # 2.1: Bắt từ companion script tag
+                uname=$(echo "$log_sample" | grep -Eio '\[AUTO_REJOIN_USER\][[:space:]]*[A-Za-z0-9_]+' | head -n 1 | awk '{print $2}')
+                # 2.2: Bắt từ FLog::PlayerInfo hoặc UserName
+                if [ -z "$uname" ]; then
+                    uname=$(echo "$log_sample" | grep -Eio '(UserName|username)[:= ][[:space:]]*[A-Za-z0-9_]{3,30}' | head -n 1 | awk '{print $NF}' | tr -d '"')
+                fi
+                # 2.3: Bắt từ Connection accepted for player
+                if [ -z "$uname" ]; then
+                    uname=$(echo "$log_sample" | grep -Eio 'player[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*\([A-Za-z0-9_]+\)' | grep -oE '\([A-Za-z0-9_]+\)' | tr -d '()' | head -n 1)
+                fi
             fi
-        fi
-
-        # Cách 3: Tìm trong các file JSON ở cấp đầu của files/ (tránh đệ quy sâu vào thư mục cache)
-        if [ -z "$uname" ]; then
-            uname=$(android_app_grep_recursive "$pkg" files '"username"' 2>/dev/null \
-                | grep -oP '(?<="username":")[^"]{3,40}' \
-                | head -1 2>/dev/null)
-        fi
-
-        # Cách 4: Đọc account cache JSON nếu có (chỉ tìm trong thư mục files/ với maxdepth 2)
-        if [ -z "$uname" ]; then
-            local account_files account_file
-            account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
-            for account_file in $account_files; do
-                uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
-                    | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
-                [ -n "$uname" ] && break
-            done
         fi
     fi
 
-    # ── Fallback: đọc từ file config (đã nhập tay trước đó) ─
+    # 3. Nếu có Root: thử đọc trực tiếp từ SharedPreferences / SQLite / JSON
+    if [ -z "$uname" ]; then
+        local has_root=false
+        [ "$(android_detect_executor)" = "su" ] && has_root=true
+
+        if $has_root; then
+            uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
+                | grep -oP '(?<=value=")[^"]{3,40}' \
+                | grep -v '^[0-9]*$' \
+                | grep -v 'true\|false\|null' \
+                | head -1 2>/dev/null)
+
+            if [ -z "$uname" ]; then
+                local db_file
+                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '')
+                if [ -n "$db_file" ]; then
+                    uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
+                fi
+            fi
+
+            if [ -z "$uname" ]; then
+                local account_files account_file
+                account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
+                for account_file in $account_files; do
+                    uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
+                        | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
+                    [ -n "$uname" ] && break
+                done
+            fi
+        fi
+    fi
+
+    # 4. Fallback: đọc từ file config (đã nhập tay trước đó)
     if [ -z "$uname" ]; then
         local cfg="config_${pkg}.cfg"
         uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)

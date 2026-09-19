@@ -20,8 +20,14 @@ local LocalPlayer = Players.LocalPlayer
 local PlaceId = game.PlaceId
 local JobId = game.JobId
 
--- 1. Anti-AFK Mechanism (Chống 20-minute Idle Kick)
+-- 1. Export Username & Anti-AFK Mechanism
 if LocalPlayer then
+    print("[AUTO_REJOIN_USER] " .. tostring(LocalPlayer.Name))
+    pcall(function()
+        if writefile then
+            writefile("roblox_username.txt", tostring(LocalPlayer.Name))
+        end
+    end)
     LocalPlayer.Idled:Connect(function()
         pcall(function()
             VirtualUser:CaptureController()

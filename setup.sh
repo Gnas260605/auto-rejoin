@@ -347,6 +347,7 @@ for PKG in $PACKAGES; do
 
     EXISTING_PLACE_ID=""
     EXISTING_PRIVATE_CODE=""
+    EXISTING_USERNAME=""
     EXISTING_WEBHOOK=""
     EXISTING_CHECK_INTERVAL=""
     EXISTING_AUTO_RESTART=""
@@ -369,6 +370,7 @@ for PKG in $PACKAGES; do
     if [ -f "$CFG" ]; then
         EXISTING_PLACE_ID=$(grep '^PLACE_ID=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_PRIVATE_CODE=$(grep '^PRIVATE_CODE=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+        EXISTING_USERNAME=$(grep '^ROBLOX_USERNAME=' "$CFG" | cut -d'"' -f2 2>/dev/null)
         EXISTING_WEBHOOK=$(grep '^DISCORD_WEBHOOK=' "$CFG" | cut -d'"' -f2 2>/dev/null)
         EXISTING_CHECK_INTERVAL=$(grep '^CHECK_INTERVAL=' "$CFG" | cut -d'=' -f2 2>/dev/null)
         EXISTING_AUTO_RESTART=$(grep '^AUTO_RESTART_PERIOD=' "$CFG" | cut -d'=' -f2 2>/dev/null)
@@ -388,6 +390,8 @@ for PKG in $PACKAGES; do
         EXISTING_ALLOW_UNSCOPED=$(grep '^ALLOW_UNSCOPED_DEEPLINK=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_ALLOW_HOME=$(grep '^ALLOW_HOME_FALLBACK=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     fi
+
+    SAVED_USERNAME="${EXISTING_USERNAME:-}"
 
     # Lấy giá trị hiện tại (ưu tiên của account -> mặc định chung -> mặc định mặc định)
     DISCORD_WEBHOOK="${EXISTING_WEBHOOK:-$DEFAULT_WEBHOOK}"
