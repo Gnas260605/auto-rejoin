@@ -973,55 +973,47 @@ launch_roblox() {
         bounds_args=("$left" "$top" "$right" "$bottom")
     fi
 
-    # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
+    # 1. Thử mở bằng executor hệ thống (su / adb / direct) với user 0
     if declare -F session_begin >/dev/null 2>&1; then
         session_begin "$pkg" "$PLACE_ID" >/dev/null 2>&1 || true
     fi
 
-    ANDROID_EXECUTOR=direct android_start_uri_fresh "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+    android_start_uri_for_user_fresh 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
     local ret=$?
     [ $ret -eq 0 ] && launch_success=true
 
-    # 2. Nếu thất bại, thử chạy qua run_cmd (su/adb) kèm theo --user 0
+    # 2. Thử start URI chuẩn (fresh)
     if [ $ret -ne 0 ]; then
-        android_start_uri_for_user_fresh 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+        android_start_uri_fresh "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
         [ $ret -eq 0 ] && launch_success=true
     fi
 
-    # Some Android/emulator builds reject -S/clear-task on VIEW deep-links.
-    # Keep the target package scoped so we do not open the last Roblox/home place.
-    if [ $ret -ne 0 ]; then
-        ANDROID_EXECUTOR=direct android_start_uri "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
-        ret=$?
-        [ $ret -eq 0 ] && launch_success=true
-    fi
-
+    # 3. Thử start URI không có flag -S
     if [ $ret -ne 0 ]; then
         android_start_uri_for_user 0 "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
         [ $ret -eq 0 ] && launch_success=true
     fi
 
-    # 3. Chỉ cho phép deep-link không chỉ định package khi người vận hành bật rõ ràng.
-    # Fallback này có thể mở nhầm Roblox clone hoặc experience gần nhất trên thiết bị.
-    if [ $ret -ne 0 ] && [ "${ALLOW_UNSCOPED_DEEPLINK:-false}" = "true" ]; then
-        ANDROID_EXECUTOR=direct android_start_uri "" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+    if [ $ret -ne 0 ]; then
+        android_start_uri "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
         [ $ret -eq 0 ] && launch_success=true
     fi
 
-    # 4. Cách 2 (su/adb): am start không chỉ định package kèm theo --user 0
-    if [ $ret -ne 0 ] && [ "${ALLOW_UNSCOPED_DEEPLINK:-false}" = "true" ]; then
-        android_start_uri_for_user 0 "" "$link" "${bounds_args[@]}" > /dev/null 2>&1
+    # 4. Thử start trực tiếp component ActivityProtocolLaunch hoặc MainActivity của clone
+    if [ $ret -ne 0 ]; then
+        android_exec am start --user 0 -n "$pkg/com.roblox.client.ActivityProtocolLaunch" -a android.intent.action.VIEW -d "$link" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_exec am start --user 0 -n "$pkg/com.roblox.client.MainActivity" -a android.intent.action.VIEW -d "$link" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_exec am start -n "$pkg/com.roblox.client.ActivityProtocolLaunch" -a android.intent.action.VIEW -d "$link" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_exec am start -n "$pkg/com.roblox.client.MainActivity" -a android.intent.action.VIEW -d "$link" "${bounds_args[@]}" > /dev/null 2>&1
         ret=$?
         [ $ret -eq 0 ] && launch_success=true
     fi
 
-    # 5. Mở thẳng MainActivity chỉ khi bật rõ ràng vì cách này không bảo đảm đúng Place ID.
-    if [ $ret -ne 0 ] && [ "${ALLOW_HOME_FALLBACK:-false}" = "true" ]; then
-        ANDROID_EXECUTOR=direct android_start_activity "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
-        android_start_activity_for_user 0 "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+    # 5. Mở qua monkey nếu deep-link bị chặn
+    if [ $ret -ne 0 ]; then
         android_monkey_package "$pkg" > /dev/null 2>&1
         ret=$?
         [ $ret -eq 0 ] && launch_success=true
