@@ -867,7 +867,18 @@ check_roblox_task_present() {
 check_roblox_window_visible() {
     local pkg="$ROBLOX_PACKAGE"
 
-    # 1. Check qua shared snapshot nếu còn mới
+    # 1. Nếu process không chạy -> Window chắc chắn không tồn tại
+    if ! is_roblox_running; then
+        return 1
+    fi
+
+    # 2. Nếu process đang chạy và đã từng vào game (LAST_IN_GAME > 0):
+    # Luôn coi là visible để bảo vệ tuyệt đối các tab clone / freeform / floating window / chạy nền
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
+        return 0
+    fi
+
+    # 3. Check qua shared snapshot nếu còn mới
     if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
         local mtime now
         mtime=$(stat -c %Y "${TMP_DIR}/roblox_windows.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_windows.txt" 2>/dev/null)
@@ -877,24 +888,23 @@ check_roblox_window_visible() {
         fi
     fi
 
-    # 2. Check window visible qua dumpsys (surface visible / window focused / top activity)
+    # 4. Check window visible qua dumpsys (surface visible / window focused / top activity)
     if android_is_window_visible "$pkg" 2>/dev/null; then
         return 0
     fi
 
-    # 3. Check window record (tồn tại trong WindowManager kể cả khi freeform nằm phía sau)
+    # 5. Check window record (tồn tại trong WindowManager kể cả khi freeform nằm phía sau)
     if android_has_window_record "$pkg" 2>/dev/null; then
         return 0
     fi
 
-    # 4. Khi đang chơi (LAST_IN_GAME > 0) và process đang chạy, nếu task còn trong stack thì window vẫn hoạt động
-    if [ "${LAST_IN_GAME:-0}" -gt 0 ] && is_roblox_running; then
-        if android_is_task_present "$pkg" 2>/dev/null; then
-            return 0
-        fi
+    # 6. Check task present
+    if android_is_task_present "$pkg" 2>/dev/null; then
+        return 0
     fi
 
-    return 1
+    # 7. Fallback: Nếu process đang chạy thì cửa sổ vẫn đang mở
+    return 0
 }
 
 # ── Kiểm tra log xem có session game đang active không ────
