@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import path from "node:path";
+import fs from "node:fs";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -176,6 +178,21 @@ export function createApp({
       rateLimits: admRateLimits
     })
   );
+
+  // Static Frontend Serving (if admin/dist exists)
+  const distPath = path.resolve(process.cwd(), "admin/dist");
+  const fallbackDistPath = path.resolve(process.cwd(), "../admin/dist");
+  const activeDistPath = fs.existsSync(distPath) ? distPath : (fs.existsSync(fallbackDistPath) ? fallbackDistPath : null);
+
+  if (activeDistPath) {
+    app.use(express.static(activeDistPath));
+    app.use((req, res, next) => {
+      if (req.method === "GET" && !req.path.startsWith("/api")) {
+        return res.sendFile(path.join(activeDistPath, "index.html"));
+      }
+      next();
+    });
+  }
 
   app.use(notFoundMiddleware);
   app.use(errorMiddleware);
