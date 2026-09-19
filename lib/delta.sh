@@ -89,3 +89,41 @@ delta_set_clipboard_key() {
 
     return 1
 }
+
+delta_find_autoexec_dirs() {
+    local pkg="${1:-com.roblox.client}"
+    local dirs=(
+        "/sdcard/Delta/autoexec"
+        "/sdcard/Delta/scripts"
+        "/sdcard/Codex/autoexec"
+        "/sdcard/Fluxus/autoexec"
+        "/sdcard/Arceus/autoexec"
+        "/sdcard/Hydrogen/autoexec"
+        "/sdcard/Android/data/${pkg}/files/Delta/autoexec"
+        "/data/data/${pkg}/files/Delta/autoexec"
+    )
+
+    local found=0
+    for d in "${dirs[@]}"; do
+        if [ -d "$d" ]; then
+            printf '%s\n' "$d"
+            found=$((found + 1))
+        fi
+    done
+    [ "$found" -gt 0 ]
+}
+
+delta_install_companion_script() {
+    local source_script="$1"
+    local pkg="${2:-com.roblox.client}"
+    [ -f "$source_script" ] || return 1
+
+    local installed=0
+    while IFS= read -r target_dir; do
+        if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
+            cp -f "$source_script" "${target_dir}/auto_rejoin_companion.lua" 2>/dev/null && installed=$((installed + 1))
+        fi
+    done < <(delta_find_autoexec_dirs "$pkg")
+
+    [ "$installed" -gt 0 ]
+}

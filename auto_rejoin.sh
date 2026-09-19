@@ -308,6 +308,201 @@ scan_all_usernames() {
 
 
 
+MGT='\033[0;35m'
+CYN='\033[0;36m'
+WHT='\033[1;37m'
+BGRN='\033[1;32m'   # Bright Green
+BYLN='\033[1;33m'   # Bright Yellow
+NC='\033[0m'
+
+# ── Âm thanh thông báo (beep qua /dev/tty nếu có) ───────
+beep_ok()   { printf '\a' 2>/dev/null; }
+beep_warn() { printf '\a\a' 2>/dev/null; }
+
+# ── Ghi log ─────────────────────────────────────────────
+log_msg() {
+    local ts; ts=$(date '+%Y-%m-%d %H:%M:%S')
+    local display
+    display="$(log_redact_secret "$1")"
+    echo -e "${CYN}[$ts]${NC} $display"
+    log_info "$display" "$LOG_FILE"
+}
+
+# ── Gửi Discord Webhook ──────────────────────────────────
+send_discord() {
+    if declare -F entitlement_discord_allowed >/dev/null 2>&1 && ! entitlement_discord_allowed; then
+        if [ "${ENTITLEMENT_DISCORD_WARNED:-false}" != "true" ]; then
+            log_event WARN discord_entitlement_blocked "$LOG_FILE" package "${ROBLOX_PACKAGE:-unknown}" reason "missing_discord_entitlement"
+            ENTITLEMENT_DISCORD_WARNED=true
+        fi
+        return 0
+    fi
+    notification_send_discord "${DISCORD_WEBHOOK:-}" "$1" || true
+}
+
+# ── Thống kê rejoin ──────────────────────────────────────
+inc_rejoin_count() {
+    local pkg="${1:-$ROBLOX_PACKAGE}"
+    local stats_file="roblox_stats_${pkg}.dat"
+    local count=0
+    [ -f "$stats_file" ] && count=$(cat "$stats_file" 2>/dev/null)
+    count=$(( ${count:-0} + 1 ))
+    echo "$count" > "$stats_file"
+}
+
+get_rejoin_count() {
+    local pkg="${1:-$ROBLOX_PACKAGE}"
+    local stats_file="roblox_stats_${pkg}.dat"
+    if [ -f "$stats_file" ]; then
+        cat "$stats_file" 2>/dev/null
+    else
+        # Fallback đọc từ file stats cũ nếu có
+        local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
+        [ -f "roblox_stats.dat" ] && grep "^${key}=" "roblox_stats.dat" 2>/dev/null | cut -d= -f2 || echo "0"
+    fi
+}
+
+# ── Tải/Lưu cấu hình ─────────────────────────────────────
+load_config() {
+    if ! config_load "$CONFIG_FILE"; then
+        log_msg "${YLW}[CONFIG]${NC} Config có giá trị không hợp lệ; đã dùng default an toàn cho key lỗi."
+    fi
+    if [ -n "$CONFIG_WARNINGS" ]; then
+        while IFS= read -r warning; do
+            [ -n "$warning" ] && log_msg "${YLW}[CONFIG]${NC} $warning"
+        done <<EOF
+$CONFIG_WARNINGS
+EOF
+    fi
+}
+
+save_config() {
+    if ! config_save "$CONFIG_FILE"; then
+        log_msg "${RED}[CONFIG]${NC} Không thể lưu config: $CONFIG_FILE"
+        return 1
+    fi
+}
+
+# ── Chạy lệnh với timeout để tránh treo vĩnh viễn ───────
+run_with_timeout() {
+    local secs="$1"; shift
+    if command -v timeout > /dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        # Fallback: chạy nền + wait với giới hạn thời gian
+        "$@" &
+        local pid=$!
+        local i=0
+        while kill -0 "$pid" 2>/dev/null && [ $i -lt "$secs" ]; do
+            sleep 1; i=$((i+1))
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null
+            return 124
+        fi
+        wait "$pid" 2>/dev/null
+    fi
+}
+
+# ── Phát hiện executor ───────────────────────────────────
+detect_executor() {
+    android_detect_executor
+}
+
+EXECUTOR=""
+# Chỉ quét executor 1 lần, cache lại để không quét lại mỗi lần vẽ menu
+init_executor() {
+    [ -n "$EXECUTOR" ] && return
+    EXECUTOR=$(detect_executor)
+    android_set_executor "$EXECUTOR"
+}
+
+run_cmd() {
+    echo "run_cmd is deprecated; use lib/android.sh typed wrappers" >&2
+    return 2
+}
+
+# ── Tự động quét username Roblox ─────────────────────────
+# Thử nhiều phương thức: root SharedPrefs → DB → files → config
+get_roblox_username() {
+    local pkg="${1:-$ROBLOX_PACKAGE}"
+    local uname=""
+
+    # ── Nếu có Root: thử đọc trực tiếp từ data app ──────
+    local has_root=false
+    [ "$(android_detect_executor)" = "su" ] && has_root=true
+
+    if $has_root; then
+        # Cách 1: Đọc SharedPreferences XML (thường lưu tên acc ở đây)
+        uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
+            | grep -oP '(?<=value=")[^"]{3,40}' \
+            | grep -v '^[0-9]*$' \
+            | grep -v 'true\|false\|null' \
+            | head -1 2>/dev/null)
+
+        # Cách 2: Thử SQLite database Roblox
+        if [ -z "$uname" ]; then
+            local db_file
+            db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '\r')
+            if [ -n "$db_file" ]; then
+                uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
+            fi
+        fi
+
+        # Cách 3: Tìm trong các file JSON ở cấp đầu của files/ (tránh đệ quy sâu vào thư mục cache)
+        if [ -z "$uname" ]; then
+            uname=$(android_app_grep_recursive "$pkg" files '"username"' 2>/dev/null \
+                | grep -oP '(?<="username":")[^"]{3,40}' \
+                | head -1 2>/dev/null)
+        fi
+
+        # Cách 4: Đọc account cache JSON nếu có (chỉ tìm trong thư mục files/ với maxdepth 2)
+        if [ -z "$uname" ]; then
+            local account_files account_file
+            account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
+            for account_file in $account_files; do
+                uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
+                    | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
+                [ -n "$uname" ] && break
+            done
+        fi
+    fi
+
+    # ── Fallback: đọc từ file config (đã nhập tay trước đó) ─
+    if [ -z "$uname" ]; then
+        local cfg="config_${pkg}.cfg"
+        uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
+    fi
+
+    echo "${uname:-N/A}"
+}
+
+# ── Quét username cho tất cả acc và lưu vào config ───────
+scan_all_usernames() {
+    local cfgs; cfgs=$(ls config_com*.cfg 2>/dev/null)
+    [ -z "$cfgs" ] && [ -f "config.cfg" ] && cfgs="config.cfg"
+    [ -z "$cfgs" ] && return
+
+    local found=0
+    for cfg in $cfgs; do
+        local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
+        [ -z "$pkg" ] && continue
+        local uname; uname=$(get_roblox_username "$pkg")
+        if [ "$uname" != "N/A" ] && [ -n "$uname" ]; then
+            # Cập nhật vào config
+            if grep -q '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null; then
+                sed -i "s/^ROBLOX_USERNAME=.*/ROBLOX_USERNAME=\"$uname\"/" "$cfg"
+            else
+                echo "ROBLOX_USERNAME=\"$uname\"" >> "$cfg"
+            fi
+            found=$((found+1))
+        fi
+    done
+    echo "$found"
+}
+
+
+
 # ══════════════════════════════════════════════════════════
 #  Lấy danh sách tất cả file config
 # ══════════════════════════════════════════════════════════
@@ -424,50 +619,50 @@ launch_roblox() {
             fi
         fi
         if [ -z "$link" ]; then
-        local idx; idx=$(get_package_index "$pkg")
-        local retry_offset=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + ${RUNTIME_BACKOFF_FAILURES:-0} + ${LOBBY_RETRY_COUNT:-0} ))
-        idx=$((idx + retry_offset))
-        local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
-        local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
-        local failed_jobs
-        failed_jobs="$(low_server_failed_jobs_csv 2>/dev/null || true)"
-        log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
-        local server_info
-        server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
-        if [ -z "$server_info" ] && [ "${max_p:-0}" -gt 0 ]; then
-            log_msg "${YLW}[LOW_SERVER]${NC} Không có server <=${max_p} người; thử chọn server thấp nhất còn trống..."
-            server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" 0 "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
-        fi
-        if [ -n "$server_info" ]; then
-            local chosen_job="${server_info%%|*}"
-            local rest="${server_info#*|}"
-            local chosen_playing="${rest%%|*}"
-            local chosen_max="${rest#*|}"
-            chosen_max="${chosen_max%%|*}"
-            CURRENT_LOW_SERVER_JOB="$chosen_job"
-            CURRENT_LOW_SERVER_PLAYING="$chosen_playing"
-            CURRENT_LOW_SERVER_MAX="$chosen_max"
-            log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
-            link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || {
-                log_msg "${RED}[LAUNCH]${NC} Place ID hoặc Job ID không hợp lệ."
-                return 1
-            }
-        else
-            if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
-                log_msg "${YLW}[LOW_SERVER]${NC} API server ít người không khả dụng/rate-limit; vẫn mở đúng Place ID thay vì đứng im."
-                log_event WARN low_server_strict_fallback "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
-                link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+            local idx; idx=$(get_package_index "$pkg")
+            local retry_offset=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + ${RUNTIME_BACKOFF_FAILURES:-0} + ${LOBBY_RETRY_COUNT:-0} ))
+            idx=$((idx + retry_offset))
+            local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
+            local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
+            local failed_jobs
+            failed_jobs="$(low_server_failed_jobs_csv 2>/dev/null || true)"
+            log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
+            local server_info
+            server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
+            if [ -z "$server_info" ] && [ "${max_p:-0}" -gt 0 ]; then
+                log_msg "${YLW}[LOW_SERVER]${NC} Không có server <=${max_p} người; thử chọn server thấp nhất còn trống..."
+                server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" 0 "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
+            fi
+            if [ -n "$server_info" ]; then
+                local chosen_job="${server_info%%|*}"
+                local rest="${server_info#*|}"
+                local chosen_playing="${rest%%|*}"
+                local chosen_max="${rest#*|}"
+                chosen_max="${chosen_max%%|*}"
+                CURRENT_LOW_SERVER_JOB="$chosen_job"
+                CURRENT_LOW_SERVER_PLAYING="$chosen_playing"
+                CURRENT_LOW_SERVER_MAX="$chosen_max"
+                log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
+                link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || {
+                    log_msg "${RED}[LAUNCH]${NC} Place ID hoặc Job ID không hợp lệ."
                     return 1
                 }
             else
-                log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
-                link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                    return 1
-                }
+                if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
+                    log_msg "${YLW}[LOW_SERVER]${NC} API server ít người không khả dụng/rate-limit; vẫn mở đúng Place ID thay vì đứng im."
+                    log_event WARN low_server_strict_fallback "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                    link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                        log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+                        return 1
+                    }
+                else
+                    log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
+                    link="$(roblox_build_game_uri "$PLACE_ID")" || {
+                        log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
+                        return 1
+                    }
+                fi
             fi
-        fi
         fi
     else
         link="$(roblox_build_game_uri "$PLACE_ID")" || {
@@ -687,6 +882,18 @@ check_roblox_window_visible() {
         return 0
     fi
 
+    # 3. Check window record (tồn tại trong WindowManager kể cả khi freeform nằm phía sau)
+    if android_has_window_record "$pkg" 2>/dev/null; then
+        return 0
+    fi
+
+    # 4. Khi đang chơi (LAST_IN_GAME > 0) và process đang chạy, nếu task còn trong stack thì window vẫn hoạt động
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ] && is_roblox_running; then
+        if android_is_task_present "$pkg" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
     return 1
 }
 
@@ -711,19 +918,54 @@ check_roblox_log_for_game_session() {
     local mtime
     mtime=$(android_stat_mtime "$log_dir/$latest_log" 2>/dev/null | tr -d '\r\n')
     local now; now=$(date +%s)
-    if [ -n "$mtime" ] && [ "$((now - mtime))" -gt 300 ]; then
+    # File log không được quá cũ (>300s) lúc khởi động chưa vào game. Khi đã vào game rồi, game AFK có thể không ghi log mới.
+    if [ "${LAST_IN_GAME:-0}" -eq 0 ] && [ -n "$mtime" ] && [ "$((now - mtime))" -gt 300 ]; then
         return 1
     fi
 
     local log_tail
-    log_tail=$(android_tail_lines 80 "$log_dir/$latest_log" 2>/dev/null)
+    log_tail=$(android_tail_lines 150 "$log_dir/$latest_log" 2>/dev/null)
     [ -z "$log_tail" ] && return 1
 
-    # Kiểm tra Place ID hoặc dấu hiệu kết nối game server thành công
-    if echo "$log_tail" | grep -E -q "placeId[^0-9]{0,12}${expected_place}|Joining game|Connected to game server|Game joined successfully|Replication stream connected|UniverseId"; then
+    # Kiểm tra Place ID, Allowed Place IDs hoặc dấu hiệu kết nối game server thành công
+    local pattern="placeId[^0-9]{0,12}${expected_place}|Joining game|Connected to game server|Game joined successfully|Replication stream connected|UniverseId|Connection accepted"
+    if [ -n "${ALLOWED_GAME_PLACE_IDS:-}" ]; then
+        local allowed_regex="${ALLOWED_GAME_PLACE_IDS//,/|}"
+        pattern="${pattern}|placeId[^0-9]{0,12}(${allowed_regex})"
+    fi
+
+    if echo "$log_tail" | grep -E -q "$pattern"; then
         if ! echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|you have been kicked"; then
             return 0
         fi
+    fi
+
+    return 1
+}
+
+# ── Kiểm tra log xem có dính Hàng đợi (Queue) không ────────
+check_roblox_log_for_queue() {
+    local pkg="$ROBLOX_PACKAGE"
+    local log_dir=""
+
+    if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
+        log_dir="/sdcard/Android/data/$pkg/files/logs"
+    elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
+        log_dir="/data/data/$pkg/files/logs"
+    fi
+
+    [ -z "$log_dir" ] && return 1
+
+    local latest_log
+    latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '\r\n')
+    [ -z "$latest_log" ] && return 1
+
+    local log_tail
+    log_tail=$(android_tail_lines 20 "$log_dir/$latest_log" 2>/dev/null)
+    [ -z "$log_tail" ] && return 1
+
+    if echo "$log_tail" | grep -E -i -q "position in line|waiting in queue|server is full|queueing for server|Waiting for available server"; then
+        return 0
     fi
 
     return 1
@@ -739,16 +981,24 @@ detect_roblox_session_state() {
         return 0
     fi
 
-    if ! check_roblox_window_visible; then
-        echo "WINDOW_CLOSED"
-        return 0
-    fi
-
     local resumed
     resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
 
     if echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
         echo "APP_HOME"
+        return 0
+    fi
+
+    # Nếu đang trong phiên in-game ổn định (Session Latch cho Freeform/Executor):
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
+        if ! check_roblox_log_for_disconnect; then
+            echo "GAME_ACTIVE"
+            return 0
+        fi
+    fi
+
+    if ! check_roblox_window_visible && ! check_roblox_task_present; then
+        echo "WINDOW_CLOSED"
         return 0
     fi
 
@@ -779,15 +1029,26 @@ is_in_game() {
         return 1
     fi
 
-    # 2. Window/task phải tồn tại và đang hiển thị
-    if ! check_roblox_window_visible; then
-        return 1
-    fi
-
-    # 3. Phải xác nhận đúng GameActivity/NativeActivity hoặc log session
     local resumed
     resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
 
+    # 2. Session Continuity / Executor Overlay Latch:
+    # Nếu đã từng vào game thành công (LAST_IN_GAME > 0), process còn sống,
+    # không bị văng về Home/MainActivity và không có disconnect log -> LUÔN DUY TRÌ IN_GAME
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
+        if ! echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
+            if ! check_roblox_log_for_disconnect; then
+                return 0
+            fi
+        fi
+    fi
+
+    # 3. Window/task phải tồn tại
+    if ! check_roblox_window_visible && ! check_roblox_task_present; then
+        return 1
+    fi
+
+    # 4. Phải xác nhận đúng GameActivity/NativeActivity hoặc log session
     if echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
         return 1
     fi
@@ -796,12 +1057,12 @@ is_in_game() {
         return 0
     fi
 
-    # 4. Kiểm tra qua log file game session
+    # 5. Kiểm tra qua log file game session
     if check_roblox_log_for_game_session; then
         return 0
     fi
 
-    # 5. Shared cache fallback (nếu có dumpsys snapshot)
+    # 6. Shared cache fallback (nếu có dumpsys snapshot)
     if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
         if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
             return 1
@@ -855,7 +1116,7 @@ check_roblox_log_for_disconnect() {
     [ -z "$log_tail" ] && return 1
 
     # Chỉ bắt các chuỗi lỗi ngắt kết nối / kick thực sự từ máy chủ Roblox, không bắt các từ khóa thông thường
-    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(267|277|279|288)|failed to connect|no response from server|unknown status|you have been kicked|kicked from this game|server was shut down|server has shut down"; then
+    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(260|261|262|264|266|267|268|272|273|274|277|279|280|282|284|286|288|524|529|773)|failed to connect|no response from server|unknown status|you have been kicked|kicked from this game|server was shut down|server has shut down|unexpected client behavior|same account launched|security key mismatch|this experience is currently unavailable"; then
         return 0
     fi
 

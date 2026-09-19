@@ -245,9 +245,9 @@ monitor_handle_loading() {
     # Bug 2 fix: calculate time_stuck using LOADING_STARTED_AT before comparisons
     time_stuck=$((now - LOADING_STARTED_AT))
 
-    # Fast Skip: Nếu bị kẹt trong Hàng đợi (Queue / Your position in line) quá 12s, đổi server ngay lập tức
+    # Fast Skip: Nếu bị kẹt trong Hàng đợi (Queue / Your position in line) hoặc lỗi disconnect
     if [ "$time_stuck" -ge 12 ] && [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
-        if monitor_disconnect_detected || [ "$time_stuck" -ge 20 ]; then
+        if monitor_disconnect_detected || (declare -F check_roblox_log_for_queue >/dev/null 2>&1 && check_roblox_log_for_queue); then
             log_event INFO queue_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" time_stuck "$time_stuck"
             if [ "$LOBBY_RETRY_COUNT" -lt 5 ]; then
                 declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "queue_or_connect_timeout"

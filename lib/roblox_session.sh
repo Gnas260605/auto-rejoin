@@ -195,16 +195,22 @@ session_parse_chunk() {
     fi
 
     # 4. Discrete Lifecycle Event Transitions
-    # Check disconnect / kick first
-    if echo "$chunk" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|you have been kicked"; then
+    # Check disconnect / kick first with full error codes coverage
+    if echo "$chunk" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|you have been kicked|error code[:= ]*(260|261|262|264|266|267|268|272|273|274|277|279|280|282|284|286|288|524|529|773)|unexpected client behavior|same account launched|server was shut down|server has shut down"; then
         printf 'true' > "$dir/disconnected" 2>/dev/null || true
         printf 'false' > "$dir/game_ready" 2>/dev/null || true
-        if echo "$chunk" | grep -E -i -q "you have been kicked"; then
+        if echo "$chunk" | grep -E -i -q "you have been kicked|kicked from this game|error code[:= ]*267"; then
             printf '%s' "$SESSION_EVT_KICKED" > "$dir/last_event" 2>/dev/null || true
             printf 'kicked' > "$dir/disconnect_reason" 2>/dev/null || true
-        elif echo "$chunk" | grep -E -i -q "server shutdown|game was closed"; then
+        elif echo "$chunk" | grep -E -i -q "server shutdown|game was closed|server was shut down|server has shut down"; then
             printf '%s' "$SESSION_EVT_SERVER_SHUTDOWN" > "$dir/last_event" 2>/dev/null || true
             printf 'shutdown' > "$dir/disconnect_reason" 2>/dev/null || true
+        elif echo "$chunk" | grep -E -i -q "unexpected client behavior|error code[:= ]*268"; then
+            printf '%s' "$SESSION_EVT_DISCONNECTED" > "$dir/last_event" 2>/dev/null || true
+            printf 'unexpected_client' > "$dir/disconnect_reason" 2>/dev/null || true
+        elif echo "$chunk" | grep -E -i -q "same account launched|error code[:= ]*(273|264)"; then
+            printf '%s' "$SESSION_EVT_DISCONNECTED" > "$dir/last_event" 2>/dev/null || true
+            printf 'duplicate_login' > "$dir/disconnect_reason" 2>/dev/null || true
         else
             printf '%s' "$SESSION_EVT_DISCONNECTED" > "$dir/last_event" 2>/dev/null || true
             printf 'disconnected' > "$dir/disconnect_reason" 2>/dev/null || true
