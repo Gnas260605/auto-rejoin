@@ -424,7 +424,7 @@ for PKG in $PACKAGES; do
     if [ -n "$SETUP_LOW_SERVER_STRICT" ]; then
         LOW_SERVER_STRICT="$SETUP_LOW_SERVER_STRICT"
     elif [ "$JOIN_LOW_SERVER" = "true" ] && [ "$MULTI_PUBLIC_LOW_SERVER_DEFAULT" = "true" ]; then
-        LOW_SERVER_STRICT=false
+        LOW_SERVER_STRICT=true
     else
         LOW_SERVER_STRICT="${EXISTING_LOW_STRICT:-${DEFAULT_LOW_STRICT:-false}}"
     fi

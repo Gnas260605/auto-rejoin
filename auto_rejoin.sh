@@ -705,6 +705,35 @@ low_server_reserved_jobs_file() {
     printf '%s/low_server_reserved_%s.jobs\n' "$TMP_DIR" "$safe_place"
 }
 
+low_server_lock_dir() {
+    local safe_place="${PLACE_ID:-unknown}"
+    safe_place="${safe_place//[^A-Za-z0-9_]/_}"
+    printf '%s/low_server_%s.lock\n' "$TMP_DIR" "$safe_place"
+}
+
+low_server_lock_acquire() {
+    local lock_dir
+    local waited=0
+    lock_dir="$(low_server_lock_dir)"
+    mkdir -p "$TMP_DIR" 2>/dev/null || true
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        waited=$((waited + 1))
+        if [ "$waited" -ge "${LOW_SERVER_LOCK_TIMEOUT:-20}" ]; then
+            log_event WARN low_server_lock_timeout "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" waited "$waited"
+            return 1
+        fi
+        sleep 1
+    done
+    printf '%s|%s|%s\n' "$$" "$(date +%s)" "$ROBLOX_PACKAGE" > "${lock_dir}/owner" 2>/dev/null || true
+}
+
+low_server_lock_release() {
+    local lock_dir
+    lock_dir="$(low_server_lock_dir)"
+    rm -f "${lock_dir}/owner" 2>/dev/null || true
+    rmdir "$lock_dir" 2>/dev/null || true
+}
+
 low_server_reserved_jobs_csv() {
     local file
     file="$(low_server_reserved_jobs_file)"
@@ -735,6 +764,40 @@ low_server_reserve_job() {
     printf '%s|%s|%s|%s\n' "$job" "$now" "$ROBLOX_PACKAGE" "$reason" >> "${file}.tmp"
     mv "${file}.tmp" "$file" 2>/dev/null || true
     log_event INFO low_server_job_reserved "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" job "$job" ttl "$ttl" reason "$reason"
+}
+
+low_server_pick_and_reserve() {
+    local place_id="$1"
+    local min_p="$2"
+    local max_p="$3"
+    local failed_jobs reserved_jobs combined_jobs server_info
+
+    if ! low_server_lock_acquire; then
+        return 1
+    fi
+
+    failed_jobs="$(low_server_failed_jobs_csv 2>/dev/null || true)"
+    reserved_jobs="$(low_server_reserved_jobs_csv 2>/dev/null || true)"
+    combined_jobs="$(low_server_join_csv "$failed_jobs" "$reserved_jobs")"
+
+    # Under the reservation lock, always take the lowest currently available
+    # non-reserved server. The lock plus reservation gives each package a unique
+    # JobId; using slot 0 avoids modulo wrap-around when the candidate list
+    # shrinks after previous packages reserve servers.
+    server_info="$(roblox_pick_low_server "$place_id" 0 "$min_p" "$max_p" "$combined_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
+    if [ -z "$server_info" ] && [ "${max_p:-0}" -gt 0 ]; then
+        server_info="$(roblox_pick_low_server "$place_id" 0 "$min_p" 0 "$combined_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
+    fi
+
+    if [ -n "$server_info" ]; then
+        low_server_reserve_job "${server_info%%|*}" "launch_selected"
+        printf '%s\n' "$server_info"
+        low_server_lock_release
+        return 0
+    fi
+
+    low_server_lock_release
+    return 1
 }
 
 low_server_mark_current_failed() {
@@ -784,17 +847,9 @@ launch_roblox() {
             idx=$((idx + retry_offset))
             local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
             local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
-            local failed_jobs reserved_jobs
-            failed_jobs="$(low_server_failed_jobs_csv 2>/dev/null || true)"
-            reserved_jobs="$(low_server_reserved_jobs_csv 2>/dev/null || true)"
-            failed_jobs="$(low_server_join_csv "$failed_jobs" "$reserved_jobs")"
             log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
             local server_info
-            server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
-            if [ -z "$server_info" ] && [ "${max_p:-0}" -gt 0 ]; then
-                log_msg "${YLW}[LOW_SERVER]${NC} Không có server <=${max_p} người; thử chọn server thấp nhất còn trống..."
-                server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" 0 "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
-            fi
+            server_info="$(low_server_pick_and_reserve "$PLACE_ID" "$min_p" "$max_p" 2>/dev/null || true)"
             if [ -n "$server_info" ]; then
                 local chosen_job="${server_info%%|*}"
                 local rest="${server_info#*|}"
@@ -804,19 +859,15 @@ launch_roblox() {
                 CURRENT_LOW_SERVER_JOB="$chosen_job"
                 CURRENT_LOW_SERVER_PLAYING="$chosen_playing"
                 CURRENT_LOW_SERVER_MAX="$chosen_max"
-                low_server_reserve_job "$chosen_job" "launch_selected"
                 log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
                 link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || {
                     log_msg "${RED}[LAUNCH]${NC} Place ID hoặc Job ID không hợp lệ."
                     return 1
                 }
             else
-                log_msg "${YLW}[LOW_SERVER]${NC} Không tìm được server <=${max_p} người hoặc API bận; tự động vào server mặc định."
-                log_event WARN low_server_fallback "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
-                link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                    return 1
-                }
+                log_msg "${RED}[LOW_SERVER]${NC} Không tìm được server riêng/ít người. Hủy launch lần này để tránh nhiều acc vào cùng server."
+                log_event WARN low_server_unique_unavailable "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                return 1
             fi
         fi
     else

@@ -104,6 +104,9 @@ assert_eq "reserved job is skipped by next clone" "job-server-smallest-2|1|50" "
 server_skip_two_reserved="$(roblox_pick_low_server 189707 0 1 0 "job-server-smallest-1,job-server-smallest-2")"
 assert_eq "multiple reserved jobs are skipped" "job-server-small-3|2|50" "$server_skip_two_reserved"
 
+assert_status "all low servers reserved fails instead of wrapping" 1 \
+    "$(roblox_pick_low_server 189707 0 1 2 "job-server-smallest-1,job-server-smallest-2,job-server-small-3" >/dev/null 2>&1; echo $?)"
+
 # 5. Fallback test when API returns empty or invalid
 roblox_fetch_public_servers() {
     printf '{"data":[]}\n'
