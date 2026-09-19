@@ -144,10 +144,11 @@ roblox_pick_low_server() {
     local min_players="${3:-1}"
     local max_players="${4:-0}"
     local failed_jobs="${5:-}"
+    local max_pages="${6:-5}"
 
     if declare -F roblox_api_pick_server >/dev/null 2>&1; then
         local picked
-        picked="$(roblox_api_pick_server "$place_id" "$slot_index" "$min_players" "$max_players" "$failed_jobs")" || return 1
+        picked="$(roblox_api_pick_server "$place_id" "$slot_index" "$min_players" "$max_players" "$failed_jobs" "$max_pages")" || return 1
         printf '%s\n' "$picked"
         return 0
     fi
@@ -160,9 +161,13 @@ roblox_pick_low_server() {
     if command -v jq >/dev/null 2>&1; then
         servers="$(printf '%s' "$json_out" | jq -r \
             --argjson min "$min_players" \
-            --argjson max "$max_players" '
+            --argjson max "$max_players" \
+            --arg failed "$failed_jobs" '
+            ($failed | split(",") | map(select(length > 0))) as $bad
+            |
             [ (.data // [])[]
               | select(.id != null and .playing != null and .maxPlayers != null)
+              | select((.id | tostring) as $jid | ($bad | index($jid) | not))
               | select(.playing < .maxPlayers)
               | select($min <= 0 or .playing >= $min)
               | select($max <= 0 or .playing <= $max)
@@ -182,6 +187,7 @@ try:
     items = data.get("data", [])
     min_p = int(sys.argv[1])
     max_p = int(sys.argv[2])
+    failed = set(x.strip() for x in (sys.argv[3] if len(sys.argv) > 3 else "").split(",") if x.strip())
     valid = []
     for it in items:
         jid = it.get("id")
@@ -189,6 +195,8 @@ try:
         mx = it.get("maxPlayers")
         png = it.get("ping", 999) or 999
         if not jid or pl is None or mx is None:
+            continue
+        if str(jid) in failed:
             continue
         if pl >= mx:
             continue
@@ -202,7 +210,7 @@ try:
         print(f"{jid}|{pl}|{mx}")
 except Exception:
     pass
-' "$min_players" "$max_players" 2>/dev/null || true)"
+' "$min_players" "$max_players" "$failed_jobs" 2>/dev/null || true)"
     elif command -v node >/dev/null 2>&1; then
         servers="$(printf '%s' "$json_out" | node -e '
 let input = "";
@@ -212,8 +220,10 @@ process.stdin.on("end", () => {
         const data = JSON.parse(input);
         const minP = parseInt(process.argv[1] || "1", 10);
         const maxP = parseInt(process.argv[2] || "0", 10);
+        const failed = new Set((process.argv[3] || "").split(",").map(s => s.trim()).filter(Boolean));
         const items = (data.data || []).filter(s => {
             if (!s.id || s.playing === undefined || s.maxPlayers === undefined) return false;
+            if (failed.has(String(s.id))) return false;
             if (s.playing >= s.maxPlayers) return false;
             if (minP > 0 && s.playing < minP) return false;
             if (maxP > 0 && s.playing > maxP) return false;
@@ -225,7 +235,7 @@ process.stdin.on("end", () => {
         }
     } catch (e) {}
 });
-' "$min_players" "$max_players" 2>/dev/null || true)"
+' "$min_players" "$max_players" "$failed_jobs" 2>/dev/null || true)"
     else
         return 1
     fi
@@ -478,4 +488,3 @@ roblox_launch_verified() {
 
     return 0 # launch_ok
 }
-

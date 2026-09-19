@@ -103,6 +103,9 @@ IN_GAME_TIMEOUT=120
 LOBBY_RETRY_COUNT=0
 TAP_ON_LOAD_DONE=false
 STABLE_SINCE=0
+CURRENT_LOW_SERVER_JOB=""
+CURRENT_LOW_SERVER_PLAYING=""
+CURRENT_LOW_SERVER_MAX=""
 
 # ── Màu sắc ─────────────────────────────────────────────
 BLK='\033[0;30m'
@@ -354,6 +357,48 @@ get_package_index() {
     echo "0"
 }
 
+low_server_failed_jobs_file() {
+    local safe_place="${PLACE_ID:-unknown}"
+    safe_place="${safe_place//[^A-Za-z0-9_]/_}"
+    printf '%s/low_server_failed_%s.jobs\n' "$TMP_DIR" "$safe_place"
+}
+
+low_server_prune_failed_jobs() {
+    local file="$1"
+    local ttl="${FAILED_JOB_TTL:-300}"
+    local now tmp
+    now=$(date +%s)
+    tmp="${file}.tmp"
+    [ -f "$file" ] || return 0
+    awk -v now="$now" -v ttl="$ttl" -F'|' 'NF >= 2 && (now - $2) < ttl { print $0 }' "$file" > "$tmp" 2>/dev/null || true
+    mv "$tmp" "$file" 2>/dev/null || true
+}
+
+low_server_failed_jobs_csv() {
+    local file
+    file="$(low_server_failed_jobs_file)"
+    low_server_prune_failed_jobs "$file"
+    [ -f "$file" ] || return 0
+    awk -F'|' 'NF >= 1 && $1 != "" { print $1 }' "$file" | sort -u | paste -sd, -
+}
+
+low_server_mark_current_failed() {
+    local reason="${1:-unknown}"
+    local job="${CURRENT_LOW_SERVER_JOB:-}"
+    local file now
+    [ -n "$job" ] || return 0
+    file="$(low_server_failed_jobs_file)"
+    now=$(date +%s)
+    mkdir -p "$TMP_DIR" 2>/dev/null || true
+    low_server_prune_failed_jobs "$file"
+    grep -v "^${job}|" "$file" 2>/dev/null > "${file}.tmp" || true
+    printf '%s|%s|%s|%s\n' "$job" "$now" "$ROBLOX_PACKAGE" "$reason" >> "${file}.tmp"
+    mv "${file}.tmp" "$file" 2>/dev/null || true
+    log_msg "${YLW}[LOW_SERVER]${NC} Tam bo qua server loi ${job:0:8}... (${reason}) trong ${FAILED_JOB_TTL:-300}s."
+    log_event WARN low_server_job_blacklisted "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" job "$job" reason "$reason" ttl "${FAILED_JOB_TTL:-300}"
+    CURRENT_LOW_SERVER_JOB=""
+}
+
 launch_roblox() {
     local pkg="${ROBLOX_PACKAGE}"
     log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
@@ -384,18 +429,24 @@ launch_roblox() {
         idx=$((idx + retry_offset))
         local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
         local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
+        local failed_jobs
+        failed_jobs="$(low_server_failed_jobs_csv 2>/dev/null || true)"
         log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
         local server_info
-        server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" 2>/dev/null || true)"
+        server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
         if [ -z "$server_info" ] && [ "${max_p:-0}" -gt 0 ]; then
             log_msg "${YLW}[LOW_SERVER]${NC} Không có server <=${max_p} người; thử chọn server thấp nhất còn trống..."
-            server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" 0 2>/dev/null || true)"
+            server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" 0 "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
         fi
         if [ -n "$server_info" ]; then
             local chosen_job="${server_info%%|*}"
             local rest="${server_info#*|}"
             local chosen_playing="${rest%%|*}"
             local chosen_max="${rest#*|}"
+            chosen_max="${chosen_max%%|*}"
+            CURRENT_LOW_SERVER_JOB="$chosen_job"
+            CURRENT_LOW_SERVER_PLAYING="$chosen_playing"
+            CURRENT_LOW_SERVER_MAX="$chosen_max"
             log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
             link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || {
                 log_msg "${RED}[LAUNCH]${NC} Place ID hoặc Job ID không hợp lệ."
@@ -696,18 +747,18 @@ detect_roblox_session_state() {
     local resumed
     resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
 
-    if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|RobloxActivity"; then
+    if echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
+        echo "APP_HOME"
+        return 0
+    fi
+
+    if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
         echo "GAME_ACTIVE"
         return 0
     fi
 
     if check_roblox_log_for_game_session; then
         echo "GAME_ACTIVE"
-        return 0
-    fi
-
-    if echo "$resumed" | grep -qiE "MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
-        echo "APP_HOME"
         return 0
     fi
 
@@ -737,7 +788,11 @@ is_in_game() {
     local resumed
     resumed="$(android_get_resumed_activity "$pkg" 2>/dev/null || true)"
 
-    if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|RobloxActivity"; then
+    if echo "$resumed" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
+        return 1
+    fi
+
+    if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
         return 0
     fi
 
@@ -748,7 +803,10 @@ is_in_game() {
 
     # 5. Shared cache fallback (nếu có dumpsys snapshot)
     if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
-        if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|NativeActivity|RobloxActivity"; then
+        if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "RobloxMainActivity|MainActivity|HomeActivity|HomeScreenActivity|LandingActivity"; then
+            return 1
+        fi
+        if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
             return 0
         fi
     fi

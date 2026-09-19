@@ -210,6 +210,25 @@ monitor_handle_loading() {
         return 0
     fi
 
+    if declare -F detect_roblox_session_state >/dev/null 2>&1; then
+        local session_state
+        session_state="$(detect_roblox_session_state 2>/dev/null || printf 'UNKNOWN')"
+        if [ "$session_state" = "APP_HOME" ]; then
+            log_event WARN app_home_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" retry "$LOBBY_RETRY_COUNT"
+            if [ "$LOBBY_RETRY_COUNT" -lt "$LOBBY_RETRY_LIMIT" ]; then
+                declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "app_home"
+                LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
+                LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
+                log_msg "${YLW}[HOME]${NC} Roblox dang dung o Home, gui lai deep-link vao dung game (Lan thu $LOBBY_RETRY_COUNT/$LOBBY_RETRY_LIMIT)..."
+                monitor_request_recovery "app_home_retry" "true"
+            else
+                log_msg "${RED}[HOME]${NC} Roblox van dung o Home sau $LOBBY_RETRY_LIMIT lan thu; co the acc can bam age-check/login thu cong."
+                monitor_request_recovery "app_home_timeout" "true"
+            fi
+            return 0
+        fi
+    fi
+
     if is_in_game; then
         LAST_IN_GAME="$now"
         WINDOW_MISSING_COUNT=0
@@ -231,6 +250,7 @@ monitor_handle_loading() {
         if monitor_disconnect_detected || [ "$time_stuck" -ge 20 ]; then
             log_event INFO queue_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" time_stuck "$time_stuck"
             if [ "$LOBBY_RETRY_COUNT" -lt 5 ]; then
+                declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "queue_or_connect_timeout"
                 LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
                 LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
                 log_msg "${YLW}[QUEUE_SKIP]${NC} Phát hiện dính Hàng đợi (Queue)! Đang đổi sang server ít người khác ngay..."
@@ -244,6 +264,7 @@ monitor_handle_loading() {
     if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
         log_event WARN lobby_timeout "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" time_stuck "$time_stuck" retry "$LOBBY_RETRY_COUNT"
         if [ "$LOBBY_RETRY_COUNT" -lt "$LOBBY_RETRY_LIMIT" ]; then
+            declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "lobby_timeout"
             LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
             LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
             log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh/loading ${time_stuck}s! Force-stop rồi chọn lại server ít người (Lần thử $LOBBY_RETRY_COUNT/$LOBBY_RETRY_LIMIT)..."
@@ -309,6 +330,19 @@ monitor_handle_in_game() {
     fi
 
     now="$(monitor_now)"
+
+    if declare -F detect_roblox_session_state >/dev/null 2>&1; then
+        local session_state
+        session_state="$(detect_roblox_session_state 2>/dev/null || printf 'UNKNOWN')"
+        if [ "$session_state" = "APP_HOME" ]; then
+            declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "returned_to_home"
+            log_event WARN returned_to_home "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
+            log_msg "${YLW}[HOME]${NC} Roblox bi day ve Home khi dang choi; rejoin lai dung game..."
+            monitor_request_recovery "returned_to_home" "true"
+            return 0
+        fi
+    fi
+
     if ! is_in_game; then
         LOADING_STARTED_AT="$now"
         monitor_transition "$MONITOR_STATE_LOADING" "game_activity_missing"
@@ -354,6 +388,7 @@ monitor_handle_in_game() {
 monitor_handle_disconnected() {
     local cnt
     cnt="$(get_rejoin_count "$ROBLOX_PACKAGE")"
+    declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "disconnect_or_279"
     log_msg "${RED}[DISCONNECT]${NC} Phát hiện mất kết nối/kick từ log Roblox! Rejoin lần #$((cnt + 1))..."
     beep_warn
     send_discord "🚨 **[$ROBLOX_PACKAGE]** Mất kết nối hoặc bị Kick! Đang Rejoin lần #$((cnt + 1))..."
