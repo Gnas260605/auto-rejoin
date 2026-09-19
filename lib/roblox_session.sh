@@ -61,10 +61,20 @@ session_begin() {
     printf '%d' "$now" > "$dir/last_event_at" 2>/dev/null || true
     printf '%s' "$expected_place" > "$dir/expected_place" 2>/dev/null || true
 
-    # Reset cursor state
-    printf '0' > "$dir/log_offset" 2>/dev/null || true
-    printf '' > "$dir/log_inode" 2>/dev/null || true
-    printf '' > "$dir/log_file" 2>/dev/null || true
+    local launch_log_file=""
+    local launch_log_inode=""
+    local launch_log_size=0
+    launch_log_file="$(session_find_log_file "$package" 2>/dev/null || true)"
+    if [ -n "$launch_log_file" ] && [ -f "$launch_log_file" ]; then
+        launch_log_inode="$(session_get_file_inode "$launch_log_file")"
+        launch_log_size="$(session_get_file_size "$launch_log_file")"
+        [[ "$launch_log_size" =~ ^[0-9]+$ ]] || launch_log_size=0
+    fi
+
+    # Snapshot the current log at launch and only parse bytes appended later.
+    printf '%d' "$launch_log_size" > "$dir/log_offset" 2>/dev/null || true
+    printf '%s' "$launch_log_inode" > "$dir/log_inode" 2>/dev/null || true
+    printf '%s' "$launch_log_file" > "$dir/log_file" 2>/dev/null || true
     printf '' > "$dir/observed_place" 2>/dev/null || true
     printf '' > "$dir/observed_job" 2>/dev/null || true
     printf '' > "$dir/observed_universe" 2>/dev/null || true

@@ -198,13 +198,7 @@ session_classify() {
         return 0
     fi
 
-    # 3. Window check (Closed Freeform / Missing window)
-    if [ "$window_visible" != "true" ] && [ "$window_focused" != "true" ]; then
-        echo "${STATE_WINDOW_CLOSED}|95"
-        return 0
-    fi
-
-    # 4. Disconnect check
+    # 3. Disconnect check
     if [ "$disconnected" = "true" ]; then
         if [ "$disconnect_reason" = "kicked" ]; then
             echo "${STATE_KICKED}|95"
@@ -216,7 +210,7 @@ session_classify() {
         return 0
     fi
 
-    # 5. Home Screen Check (Roblox open at home screen without gameplay)
+    # 4. Home Screen Check (Roblox open at home screen without gameplay)
     if echo "$resumed_activity" | grep -E -i -q "RobloxMainActivity|HomeActivity|MainActivity"; then
         if [ "$game_ready" != "true" ] && [ "$last_event" = "NONE" -o "$last_event" = "LAUNCH_STARTED" ]; then
             echo "${STATE_APP_HOME}|90"
@@ -224,7 +218,10 @@ session_classify() {
         fi
     fi
 
-    # 6. Place & Universe Validation
+    # Missing freeform/window evidence is UNKNOWN while the process is alive.
+    # It must never be promoted to destructive recovery evidence.
+
+    # 5. Place & Universe Validation
     if [ -n "$observed_place" ] && [ -n "$expected_place" ]; then
         if [ "$observed_place" != "$expected_place" ]; then
             # Check if transit place or allowed place
@@ -246,13 +243,13 @@ session_classify() {
         fi
     fi
 
-    # 7. Teleporting
+    # 6. Teleporting
     if [ "$last_event" = "TELEPORT_STARTED" ]; then
         echo "${STATE_TELEPORTING}|85"
         return 0
     fi
 
-    # 8. Active Gameplay Verification
+    # 7. Active Gameplay Verification
     if [ "$game_ready" = "true" ]; then
         local score=85
         if echo "$resumed_activity" | grep -E -i -q "ActivityProtocolLaunch|GameActivity|RobloxAppActivity"; then
@@ -266,19 +263,19 @@ session_classify() {
         return 0
     fi
 
-    # 9. Server Connected / Handshake
+    # 8. Server Connected / Handshake
     if [ "$last_event" = "SERVER_CONNECTED" ]; then
         echo "${STATE_LOADING}|80"
         return 0
     fi
 
-    # 10. Joining
+    # 9. Joining
     if [ "$last_event" = "JOIN_STARTED" ] || [ "$last_event" = "SERVER_CONNECTING" ]; then
         echo "${STATE_JOINING}|75"
         return 0
     fi
 
-    # 11. Activity indicates Game is running
+    # 10. Activity indicates Game is running
     if echo "$resumed_activity" | grep -E -i -q "ActivityProtocolLaunch|GameActivity"; then
         echo "${STATE_LOADING}|70"
         return 0

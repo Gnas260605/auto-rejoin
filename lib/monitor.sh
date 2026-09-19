@@ -9,6 +9,7 @@ MONITOR_STATE_CRASHED="CRASHED"
 MONITOR_STATE_RECOVERING="RECOVERING"
 MONITOR_STATE_COOLDOWN="COOLDOWN"
 MONITOR_STATE_OFFLINE="OFFLINE"
+MONITOR_STATE_UNKNOWN_ACTIVE="UNKNOWN_ACTIVE"
 MONITOR_STATE_ERROR="ERROR"
 
 MONITOR_STATE="${MONITOR_STATE:-$MONITOR_STATE_STOPPED}"
@@ -19,6 +20,7 @@ MONITOR_RECOVERY_REASON="${MONITOR_RECOVERY_REASON:-}"
 MONITOR_RECOVERY_COUNT_REJOIN="${MONITOR_RECOVERY_COUNT_REJOIN:-true}"
 MONITOR_OFFLINE_NOTIFIED="${MONITOR_OFFLINE_NOTIFIED:-false}"
 MONITOR_COOLDOWN_NOTIFIED="${MONITOR_COOLDOWN_NOTIFIED:-false}"
+MONITOR_RECOVERY_AUTHORIZED_BY="${MONITOR_RECOVERY_AUTHORIZED_BY:-}"
 LOADING_STARTED_AT="${LOADING_STARTED_AT:-0}"
 WINDOW_MISSING_COUNT="${WINDOW_MISSING_COUNT:-0}"
 LOBBY_RETRY_COUNT="${LOBBY_RETRY_COUNT:-0}"
@@ -70,6 +72,52 @@ monitor_request_recovery() {
     MONITOR_RECOVERY_REASON="$1"
     MONITOR_RECOVERY_COUNT_REJOIN="${2:-true}"
     monitor_transition "$MONITOR_STATE_RECOVERING" "$1"
+}
+
+monitor_poll_session_evidence() {
+    if declare -F session_poll_incremental >/dev/null 2>&1; then
+        session_poll_incremental "$ROBLOX_PACKAGE" >/dev/null 2>&1 || true
+    fi
+}
+
+monitor_recovery_is_authorized() {
+    local reason="${1:-unspecified}"
+    local session_state=""
+
+    monitor_poll_session_evidence
+
+    if ! is_roblox_running; then
+        MONITOR_RECOVERY_AUTHORIZED_BY="process_dead"
+        return 0
+    fi
+
+    if monitor_disconnect_detected; then
+        MONITOR_RECOVERY_AUTHORIZED_BY="fresh_disconnect"
+        return 0
+    fi
+
+    if declare -F detect_roblox_session_state >/dev/null 2>&1; then
+        session_state="$(detect_roblox_session_state 2>/dev/null || printf 'UNKNOWN')"
+        if [ "$session_state" = "APP_HOME" ]; then
+            MONITOR_RECOVERY_AUTHORIZED_BY="app_home"
+            return 0
+        fi
+    fi
+
+    MONITOR_RECOVERY_AUTHORIZED_BY="active_session_protected"
+    log_event WARN recovery_cancelled "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason" gate_reason "$MONITOR_RECOVERY_AUTHORIZED_BY" last_in_game "${LAST_IN_GAME:-0}"
+    return 1
+}
+
+monitor_cancel_recovery() {
+    local reason="${1:-active_session_protected}"
+    MONITOR_RECOVERY_REASON=""
+    MONITOR_RECOVERY_COUNT_REJOIN="false"
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
+        monitor_transition "$MONITOR_STATE_IN_GAME" "$reason"
+    else
+        monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "$reason"
+    fi
 }
 
 monitor_record_recovery_failure() {
@@ -136,6 +184,10 @@ monitor_launch_once() {
     LOADING_STARTED_AT="$(monitor_now)"
     WINDOW_MISSING_COUNT=0
     local reason="${1:-launch_sent}"
+    if ! monitor_recovery_is_authorized "$reason"; then
+        monitor_cancel_recovery "launch_cancelled_active_session"
+        return 1
+    fi
     if [ "$reason" = "window_closed" ]; then
         log_event INFO window_relaunch_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
     fi
@@ -163,7 +215,12 @@ monitor_handle_loading() {
     local now remaining time_stuck time_left
 
     if ! check_internet; then
-        monitor_transition "$MONITOR_STATE_OFFLINE" "network_offline"
+        if is_roblox_running; then
+            log_event WARN network_offline_active_session "$LOG_FILE" package "$ROBLOX_PACKAGE"
+            monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "network_offline_active_session"
+        else
+            monitor_transition "$MONITOR_STATE_OFFLINE" "network_offline"
+        fi
         return 0
     fi
 
@@ -187,10 +244,9 @@ monitor_handle_loading() {
             log_msg "${YLW}[WINDOW]${NC} Không thấy cửa sổ Roblox (Lần $WINDOW_MISSING_COUNT/$WINDOW_MISSING_THRESHOLD)..."
             if [ "$WINDOW_MISSING_COUNT" -ge "$WINDOW_MISSING_THRESHOLD" ]; then
                 log_msg "${RED}[WINDOW]${NC} Cửa sổ Roblox bị đóng! Tự động mở lại game..."
-                log_event WARN window_closed_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
-                send_discord "🪟 **[$ROBLOX_PACKAGE]** Cửa sổ Roblox bị đóng. Đang tự động mở lại..."
+                log_event WARN window_visibility_unknown "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
                 WINDOW_MISSING_COUNT=0
-                monitor_request_recovery "window_closed" "true"
+                monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "window_visibility_unknown"
                 return 0
             fi
             return 0
@@ -263,19 +319,9 @@ monitor_handle_loading() {
 
     if [ "$time_stuck" -ge "$IN_GAME_TIMEOUT" ]; then
         log_event WARN lobby_timeout "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" time_stuck "$time_stuck" retry "$LOBBY_RETRY_COUNT"
-        if [ "$LOBBY_RETRY_COUNT" -lt "$LOBBY_RETRY_LIMIT" ]; then
-            declare -F low_server_mark_current_failed >/dev/null 2>&1 && low_server_mark_current_failed "lobby_timeout"
-            LOBBY_RETRY_COUNT=$((LOBBY_RETRY_COUNT + 1))
-            LOW_SERVER_RETRY_OFFSET=$(( ${LOW_SERVER_RETRY_OFFSET:-0} + 1 ))
-            log_msg "${YLW}[LOBBY]${NC} Kẹt ở sảnh/loading ${time_stuck}s! Force-stop rồi chọn lại server ít người (Lần thử $LOBBY_RETRY_COUNT/$LOBBY_RETRY_LIMIT)..."
-            send_discord "⚠️ **[$ROBLOX_PACKAGE]** Kẹt ở sảnh/loading ${time_stuck}s. Đang force-stop và chọn lại server ít người (Thử lần $LOBBY_RETRY_COUNT/$LOBBY_RETRY_LIMIT)..."
-            log_event INFO lobby_retry "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" retry "$LOBBY_RETRY_COUNT" limit "$LOBBY_RETRY_LIMIT"
-            monitor_request_recovery "lobby_deeplink_retry" "true"
-        else
-            log_msg "${RED}[LOBBY]${NC} Kẹt ở sảnh quá lâu (> $LOBBY_RETRY_LIMIT lần thử)! Tiến hành khởi động lại game..."
-            send_discord "🚨 **[$ROBLOX_PACKAGE]** Kẹt ở sảnh quá lâu. Khởi động lại game!"
-            monitor_request_recovery "loading_timeout" "true"
-        fi
+        log_msg "${YLW}[LOBBY]${NC} Loading timeout ${time_stuck}s without disconnect/Home evidence; keeping Roblox running."
+        log_event WARN loading_timeout_unconfirmed "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" retry "$LOBBY_RETRY_COUNT" limit "$LOBBY_RETRY_LIMIT"
+        monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "loading_timeout_unconfirmed"
         return 0
     fi
 
@@ -289,7 +335,8 @@ monitor_handle_in_game() {
     local now
 
     if ! check_internet; then
-        monitor_transition "$MONITOR_STATE_OFFLINE" "network_offline"
+        log_event WARN network_offline_active_session "$LOG_FILE" package "$ROBLOX_PACKAGE"
+        monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "network_offline_active_session"
         return 0
     fi
 
@@ -306,10 +353,9 @@ monitor_handle_in_game() {
             log_msg "${YLW}[WINDOW]${NC} Không thấy cửa sổ Roblox khi đang chơi ($WINDOW_MISSING_COUNT/$WINDOW_MISSING_THRESHOLD)..."
             if [ "$WINDOW_MISSING_COUNT" -ge "$WINDOW_MISSING_THRESHOLD" ]; then
                 log_msg "${RED}[WINDOW]${NC} Cửa sổ Roblox bị đóng! Tự động mở lại game..."
-                log_event WARN window_closed_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
-                send_discord "🪟 **[$ROBLOX_PACKAGE]** Cửa sổ Roblox bị đóng. Đang tự động mở lại..."
+                log_event WARN window_visibility_unknown "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
                 WINDOW_MISSING_COUNT=0
-                monitor_request_recovery "window_closed" "true"
+                monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "window_visibility_unknown"
                 return 0
             fi
             return 0
@@ -345,7 +391,7 @@ monitor_handle_in_game() {
 
     if ! is_in_game; then
         LOADING_STARTED_AT="$now"
-        monitor_transition "$MONITOR_STATE_LOADING" "game_activity_missing"
+        monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "game_activity_missing_unconfirmed"
         return 0
     fi
 
@@ -379,9 +425,8 @@ monitor_handle_in_game() {
     fi
 
     if [ "${AUTO_RESTART_PERIOD:-0}" -gt 0 ] && [ $((now - LAST_RESTART)) -ge "$AUTO_RESTART_PERIOD" ]; then
-        log_msg "${YLW}[RESTART]${NC} Restart định kỳ (${AUTO_RESTART_PERIOD}s)..."
-        send_discord "🔄 **[$ROBLOX_PACKAGE]** Auto restart định kỳ."
-        monitor_request_recovery "periodic_restart" "false"
+        log_msg "${YLW}[RESTART]${NC} Periodic restart is disabled by safety policy while IN_GAME."
+        log_event WARN periodic_restart_disabled "$LOG_FILE" package "$ROBLOX_PACKAGE" period "$AUTO_RESTART_PERIOD"
     fi
 }
 
@@ -408,19 +453,25 @@ monitor_handle_recovering() {
     local reason="${MONITOR_RECOVERY_REASON:-recovery_failed}"
     local count_rejoin="${MONITOR_RECOVERY_COUNT_REJOIN:-true}"
 
-    case "$reason" in
-        periodic_restart|network_restored)
-            ;;
-        *)
-            if ! monitor_record_recovery_failure "$reason"; then
-                monitor_transition "$MONITOR_STATE_COOLDOWN" "cooldown_started"
-                return 0
-            fi
-            ;;
-    esac
+    if ! monitor_recovery_is_authorized "$reason"; then
+        monitor_cancel_recovery "active_session_protected"
+        return 0
+    fi
 
-    log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
-    android_force_stop "$ROBLOX_PACKAGE" >/dev/null 2>&1
+    if ! monitor_record_recovery_failure "$reason"; then
+        monitor_transition "$MONITOR_STATE_COOLDOWN" "cooldown_started"
+        return 0
+    fi
+
+    if ! monitor_recovery_is_authorized "$reason"; then
+        monitor_cancel_recovery "active_session_protected"
+        return 0
+    fi
+
+    log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason" authorized_by "$MONITOR_RECOVERY_AUTHORIZED_BY"
+    if [ "$MONITOR_RECOVERY_AUTHORIZED_BY" != "process_dead" ]; then
+        android_force_stop "$ROBLOX_PACKAGE" >/dev/null 2>&1
+    fi
     monitor_sleep "${LOBBY_RETRY_DELAY:-3}"
     [ "$count_rejoin" = "true" ] && inc_rejoin_count "$ROBLOX_PACKAGE"
     STABLE_SINCE=0
@@ -460,10 +511,15 @@ monitor_handle_offline() {
     fi
 
     MONITOR_OFFLINE_NOTIFIED=false
-    log_msg "${GRN}[NET]${NC} Có mạng lại! Khởi động game..."
-    beep_ok
-    send_discord "📶 **[$ROBLOX_PACKAGE]** Có mạng, đang vào game!"
-    monitor_request_recovery "network_restored" "true"
+    if is_roblox_running; then
+        log_msg "${GRN}[NET]${NC} Network restored; Roblox process is still alive, observing without recovery."
+        monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "network_restored_active_session"
+    else
+        log_msg "${GRN}[NET]${NC} Network restored and Roblox process is dead; recovery is allowed."
+        beep_ok
+        send_discord "Network restored; Roblox process is dead, rejoining."
+        monitor_request_recovery "network_restored_process_dead" "true"
+    fi
 }
 
 monitor_tick() {
@@ -494,6 +550,17 @@ monitor_tick() {
             ;;
         "$MONITOR_STATE_OFFLINE")
             monitor_handle_offline
+            ;;
+        "$MONITOR_STATE_UNKNOWN_ACTIVE")
+            if ! is_roblox_running; then
+                monitor_transition "$MONITOR_STATE_CRASHED" "process_missing"
+            elif monitor_disconnect_detected; then
+                monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
+            elif is_in_game; then
+                monitor_transition "$MONITOR_STATE_IN_GAME" "active_session_confirmed"
+            else
+                log_event INFO unknown_active_observe "$LOG_FILE" package "$ROBLOX_PACKAGE" last_in_game "${LAST_IN_GAME:-0}"
+            fi
             ;;
         *)
             monitor_transition "$MONITOR_STATE_ERROR" "unexpected_state"

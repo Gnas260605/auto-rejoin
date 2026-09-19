@@ -53,6 +53,22 @@ fi
 # shellcheck source=lib/runtime.sh
 source "$RUNTIME_LIB"
 
+ROBLOX_SESSION_LIB="${SCRIPT_DIR}/lib/roblox_session.sh"
+if [ ! -f "$ROBLOX_SESSION_LIB" ]; then
+    echo "[ERROR] Missing Roblox session library: $ROBLOX_SESSION_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/roblox_session.sh
+source "$ROBLOX_SESSION_LIB"
+
+SESSION_EVIDENCE_LIB="${SCRIPT_DIR}/lib/session_evidence.sh"
+if [ ! -f "$SESSION_EVIDENCE_LIB" ]; then
+    echo "[ERROR] Missing session evidence library: $SESSION_EVIDENCE_LIB" >&2
+    exit 1
+fi
+# shellcheck source=lib/session_evidence.sh
+source "$SESSION_EVIDENCE_LIB"
+
 LICENSE_LIB="${SCRIPT_DIR}/lib/license.sh"
 if [ ! -f "$LICENSE_LIB" ]; then
     echo "[ERROR] Missing license library: $LICENSE_LIB" >&2
@@ -76,6 +92,12 @@ if [ ! -f "$ROBLOX_LIB" ]; then
 fi
 # shellcheck source=lib/roblox.sh
 source "$ROBLOX_LIB"
+
+ROBLOX_API_LIB="${SCRIPT_DIR}/lib/roblox_api.sh"
+if [ -f "$ROBLOX_API_LIB" ]; then
+    # shellcheck source=lib/roblox_api.sh
+    source "$ROBLOX_API_LIB"
+fi
 
 NOTIFICATION_LIB="${SCRIPT_DIR}/lib/notification.sh"
 if [ ! -f "$NOTIFICATION_LIB" ]; then
@@ -760,6 +782,10 @@ launch_roblox() {
     fi
 
     # 1. Thử chạy trực tiếp bằng quyền user Termux (không dùng su) để đảm bảo UI nổi lên màn hình chính
+    if declare -F session_begin >/dev/null 2>&1; then
+        session_begin "$pkg" "$PLACE_ID" >/dev/null 2>&1 || true
+    fi
+
     ANDROID_EXECUTOR=direct android_start_uri_fresh "$pkg" "$link" "${bounds_args[@]}" > /dev/null 2>&1
     local ret=$?
     [ $ret -eq 0 ] && launch_success=true
@@ -833,27 +859,6 @@ check_internet() {
 # ── Kiểm tra Roblox process đang chạy ───────────────────
 is_roblox_running() {
     local pkg="$ROBLOX_PACKAGE"
-
-    # 1. Thử dùng file status dùng chung (nếu mới và tồn tại) để tránh gọi dumpsys trực tiếp
-    local use_shared=false
-    if [ -f "${TMP_DIR}/roblox_activities.txt" ]; then
-        local mtime
-        mtime=$(stat -c %Y "${TMP_DIR}/roblox_activities.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_activities.txt" 2>/dev/null)
-        local now; now=$(date +%s)
-        if [ -n "$mtime" ] && [ $((now - mtime)) -lt 45 ]; then
-            use_shared=true
-        fi
-    fi
-
-    if [ "$use_shared" = "true" ]; then
-        grep -q "$pkg" "${TMP_DIR}/roblox_activities.txt" && return 0
-        if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
-            grep -q "$pkg" "${TMP_DIR}/roblox_windows.txt" && return 0
-        fi
-        android_is_process_running "$pkg" 2>/dev/null && return 0
-        return 1
-    fi
-
     android_is_process_running "$pkg"
 }
 
@@ -911,6 +916,10 @@ check_roblox_window_visible() {
 check_roblox_log_for_game_session() {
     local pkg="$ROBLOX_PACKAGE"
     local expected_place="$PLACE_ID"
+    if declare -F session_poll_incremental >/dev/null 2>&1; then
+        session_poll_incremental "$pkg" >/dev/null 2>&1 || true
+        session_is_game_ready "$pkg" && return 0
+    fi
     local log_dir=""
 
     if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
@@ -982,7 +991,7 @@ check_roblox_log_for_queue() {
 }
 
 # ── Phát hiện trạng thái phiên Roblox chi tiết ───────────
-# APP_HOME | JOINING | QUEUE | LOADING_GAME | GAME_ACTIVE | WINDOW_CLOSED
+# APP_HOME | JOINING | QUEUE | LOADING_GAME | GAME_ACTIVE | UNKNOWN | WINDOW_CLOSED
 detect_roblox_session_state() {
     local pkg="$ROBLOX_PACKAGE"
 
@@ -1007,11 +1016,6 @@ detect_roblox_session_state() {
         fi
     fi
 
-    if ! check_roblox_window_visible && ! check_roblox_task_present; then
-        echo "WINDOW_CLOSED"
-        return 0
-    fi
-
     if echo "$resumed" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
         echo "GAME_ACTIVE"
         return 0
@@ -1027,7 +1031,7 @@ detect_roblox_session_state() {
         return 0
     fi
 
-    echo "JOINING"
+    echo "UNKNOWN"
 }
 
 # ── Kiểm tra xem Roblox đã vào gameplay map chưa ─────────
@@ -1092,6 +1096,11 @@ is_in_game() {
 # ── Đọc Log Roblox phát hiện mất kết nối / bị kick ────────
 check_roblox_log_for_disconnect() {
     local pkg="$ROBLOX_PACKAGE"
+    if declare -F session_poll_incremental >/dev/null 2>&1; then
+        session_poll_incremental "$pkg" >/dev/null 2>&1 || true
+        session_is_disconnected "$pkg" && return 0
+        return 1
+    fi
     local log_dir=""
 
     # Sử dụng ls -d để kiểm tra sự tồn tại của thư mục (tránh lỗi mã thoát su -c trên một số dòng máy)
@@ -1130,7 +1139,7 @@ check_roblox_log_for_disconnect() {
     [ -z "$log_tail" ] && return 1
 
     # Chỉ bắt các chuỗi lỗi ngắt kết nối / kick thực sự từ máy chủ Roblox, không bắt các từ khóa thông thường
-    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(260|261|262|264|266|267|268|272|273|274|277|279|280|282|284|286|288|524|529|773)|failed to connect|no response from server|unknown status|you have been kicked|kicked from this game|server was shut down|server has shut down|unexpected client behavior|same account launched|security key mismatch|this experience is currently unavailable"; then
+    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(260|261|262|264|266|267|268|272|273|274|277|279|280|282|284|286|288|524|529|773)|you have been kicked|kicked from this game|server was shut down|server has shut down|unexpected client behavior|same account launched"; then
         return 0
     fi
 
@@ -1147,6 +1156,18 @@ check_roblox_log_for_wrong_place() {
     local log_dir=""
 
     roblox_validate_place_id "$expected_place" || return 1
+
+    if declare -F session_poll_incremental >/dev/null 2>&1; then
+        local observed_place_session
+        session_poll_incremental "$pkg" >/dev/null 2>&1 || true
+        observed_place_session="$(session_get_observed_place "$pkg")"
+        if [ -n "$observed_place_session" ] && [ "$observed_place_session" != "$expected_place" ]; then
+            log_msg "${RED}[PLACE]${NC} Roblox dang o sai Place ID ${observed_place_session}; can ${expected_place}. Rejoin lai dung deep-link..."
+            log_event WARN wrong_place_detected "$LOG_FILE" package "$pkg" expected_place "$expected_place" observed_place "$observed_place_session"
+            return 0
+        fi
+        return 1
+    fi
 
     if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '\r\n')" ]; then
         log_dir="/sdcard/Android/data/$pkg/files/logs"

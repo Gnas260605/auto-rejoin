@@ -38,7 +38,7 @@ PLACE_ID=1
 PRIVATE_CODE=""
 EXECUTOR="direct"
 CHECK_INTERVAL=30
-AUTO_RESTART_PERIOD=7200
+AUTO_RESTART_PERIOD=0
 ANTI_AFK=false
 AFK_TAP_INTERVAL=180
 TAP_X=540
@@ -77,10 +77,17 @@ IN_GAME=false
 DISCONNECT=false
 SCREEN_DISCONNECT=false
 WRONG_PLACE=false
+APP_HOME=false
+QUEUE=false
 LAUNCH_OK=true
+CLEAR_DISCONNECT_ON_SLEEP=false
 
 test_sleep() {
     SLEEP_LOG="${SLEEP_LOG}${SLEEP_LOG:+ }$1"
+    if [ "$CLEAR_DISCONNECT_ON_SLEEP" = "true" ]; then
+        DISCONNECT=false
+        SCREEN_DISCONNECT=false
+    fi
 }
 
 log_msg() {
@@ -89,46 +96,21 @@ log_msg() {
     log_info "$1" "$LOG_FILE"
 }
 
-send_discord() {
-    DISCORD_COUNT=$((DISCORD_COUNT + 1))
-}
-
+send_discord() { DISCORD_COUNT=$((DISCORD_COUNT + 1)); }
 beep_warn() { :; }
 beep_ok() { :; }
 load_config() { :; }
 init_executor() { :; }
-
-check_internet() {
-    [ "$NET_OK" = "true" ]
-}
-
-is_roblox_running() {
-    [ "$RUNNING" = "true" ]
-}
-
-check_roblox_window_visible() {
-    [ "$WINDOW_VISIBLE" = "true" ]
-}
-
-check_roblox_task_present() {
-    [ "$TASK_PRESENT" = "true" ]
-}
-
-is_in_game() {
-    [ "$IN_GAME" = "true" ]
-}
-
-check_roblox_log_for_disconnect() {
-    [ "$DISCONNECT" = "true" ]
-}
-
-check_roblox_screen_for_disconnect() {
-    [ "$SCREEN_DISCONNECT" = "true" ]
-}
-
-check_roblox_log_for_wrong_place() {
-    [ "$WRONG_PLACE" = "true" ]
-}
+check_internet() { [ "$NET_OK" = "true" ]; }
+is_roblox_running() { [ "$RUNNING" = "true" ]; }
+check_roblox_window_visible() { [ "$WINDOW_VISIBLE" = "true" ]; }
+check_roblox_task_present() { [ "$TASK_PRESENT" = "true" ]; }
+is_in_game() { [ "$IN_GAME" = "true" ]; }
+check_roblox_log_for_disconnect() { [ "$DISCONNECT" = "true" ]; }
+check_roblox_screen_for_disconnect() { [ "$SCREEN_DISCONNECT" = "true" ]; }
+check_roblox_log_for_wrong_place() { [ "$WRONG_PLACE" = "true" ]; }
+check_roblox_log_for_queue() { [ "$QUEUE" = "true" ]; }
+detect_roblox_session_state() { if [ "$APP_HOME" = "true" ]; then printf 'APP_HOME\n'; else printf 'UNKNOWN\n'; fi; }
 
 launch_roblox() {
     [ "${LAUNCH_OK:-true}" = "true" ] || return 1
@@ -137,21 +119,11 @@ launch_roblox() {
     LOADING_STARTED_AT="$MONITOR_NOW"
 }
 
-android_force_stop() {
-    FORCE_STOP_COUNT=$((FORCE_STOP_COUNT + 1))
-}
-
-android_input_tap() {
-    TAP_COUNT=$((TAP_COUNT + 1))
-}
-
-inc_rejoin_count() {
-    REJOIN_COUNT=$((REJOIN_COUNT + 1))
-}
-
-get_rejoin_count() {
-    printf '%s\n' "$REJOIN_COUNT"
-}
+android_force_stop() { FORCE_STOP_COUNT=$((FORCE_STOP_COUNT + 1)); }
+android_input_tap() { TAP_COUNT=$((TAP_COUNT + 1)); }
+inc_rejoin_count() { REJOIN_COUNT=$((REJOIN_COUNT + 1)); }
+get_rejoin_count() { printf '%s\n' "$REJOIN_COUNT"; }
+low_server_mark_current_failed() { :; }
 
 reset_monitor_state() {
     : > "$LOG_FILE"
@@ -170,7 +142,10 @@ reset_monitor_state() {
     DISCONNECT=false
     SCREEN_DISCONNECT=false
     WRONG_PLACE=false
+    APP_HOME=false
+    QUEUE=false
     LAUNCH_OK=true
+    CLEAR_DISCONNECT_ON_SLEEP=false
     LAST_RESTART=0
     LAST_AFK_TAP=0
     LAST_LAUNCH=0
@@ -187,7 +162,7 @@ reset_monitor_state() {
     LOBBY_RETRY_DELAY=3
     TAP_ON_LOAD_DONE=false
     STABLE_SINCE=0
-    AUTO_RESTART_PERIOD=7200
+    AUTO_RESTART_PERIOD=0
     ANTI_AFK=false
     AFK_TAP_INTERVAL=180
     ROBLOX_PACKAGE="com.roblox.client"
@@ -202,6 +177,7 @@ reset_monitor_state() {
     MONITOR_REASON="startup"
     MONITOR_RECOVERY_REASON=""
     MONITOR_RECOVERY_COUNT_REJOIN=true
+    MONITOR_RECOVERY_AUTHORIZED_BY=""
     MONITOR_OFFLINE_NOTIFIED=false
     MONITOR_COOLDOWN_NOTIFIED=false
     RUNTIME_BACKOFF_FAILURES=0
@@ -213,116 +189,67 @@ reset_monitor_state() {
     RUNTIME_COOLDOWN_SECONDS=300
 }
 
-startup_to_launching() {
-    reset_monitor_state
+run_recovery_tick() {
+    MONITOR_STATE="$MONITOR_STATE_RECOVERING"
+    MONITOR_RECOVERY_REASON="$1"
+    MONITOR_RECOVERY_COUNT_REJOIN="${2:-true}"
     monitor_tick
-    assert_eq "startup -> LAUNCHING" "$MONITOR_STATE_LAUNCHING" "$MONITOR_STATE"
-    assert_contains "state transition logged" 'event=state_transition' "$LOG_FILE"
 }
 
-launch_success_to_loading() {
+test_protected_in_game_latch() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
-    monitor_tick
-    assert_eq "launch success -> LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-    assert_eq "launch called once" "1" "$LAUNCH_COUNT"
+    LAST_IN_GAME=900
+    run_recovery_tick "loading_timeout"
+    assert_eq "1 process alive latch force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "1 process alive latch launch=0" "0" "$LAUNCH_COUNT"
+    assert_eq "1 process alive latch rejoin=0" "0" "$REJOIN_COUNT"
 }
 
-launch_failure_to_recovering() {
+test_not_top_activity_protected() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
-    LAUNCH_OK=false
+    LAST_IN_GAME=900
+    IN_GAME=true
+    WINDOW_VISIBLE=false
+    WINDOW_MISSING_THRESHOLD=1
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
     monitor_tick
-    assert_eq "launch failure -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "failed launch not counted as sent" "0" "$LAUNCH_COUNT"
-    assert_eq "launch failure reason" "launch_failed" "$MONITOR_RECOVERY_REASON"
+    assert_eq "2 not top/focused force-stop=0" "0" "$FORCE_STOP_COUNT"
 }
 
-game_activity_to_in_game() {
+test_no_window_record_protected() {
+    reset_monitor_state
+    LAST_IN_GAME=900
+    WINDOW_VISIBLE=false
+    WINDOW_MISSING_THRESHOLD=1
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    monitor_tick
+    assert_eq "3 no window record force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "3 no window record -> UNKNOWN_ACTIVE" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
+}
+
+test_executor_overlay_protected() {
+    reset_monitor_state
+    LAST_IN_GAME=900
+    WINDOW_VISIBLE=false
+    TASK_PRESENT=true
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    monitor_tick
+    assert_eq "4 executor overlay force-stop=0" "0" "$FORCE_STOP_COUNT"
+}
+
+test_in_game_timeout_protected() {
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_LOADING"
-    MONITOR_NOW=2000
+    MONITOR_NOW=1200
     LAST_LAUNCH=1000
-    IN_GAME=true
+    LOADING_STARTED_AT=1000
+    IN_GAME_TIMEOUT=120
     monitor_tick
-    assert_eq "GameActivity -> IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    assert_eq "5 loading timeout force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "5 loading timeout launch=0" "0" "$LAUNCH_COUNT"
 }
 
-process_missing_to_crashed() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LOADING"
-    MONITOR_NOW=2000
-    LAST_LAUNCH=1000
-    RUNNING=false
-    monitor_tick
-    assert_eq "process missing -> CRASHED" "$MONITOR_STATE_CRASHED" "$MONITOR_STATE"
-}
-
-disconnect_to_recovering() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    DISCONNECT=true
-    monitor_tick
-    assert_eq "disconnect signal -> DISCONNECTED" "$MONITOR_STATE_DISCONNECTED" "$MONITOR_STATE"
-    monitor_tick
-    assert_eq "DISCONNECTED -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-}
-
-screen_disconnect_to_recovering() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    RUNNING=true
-    IN_GAME=true
-    SCREEN_DISCONNECT=true
-    monitor_tick
-    assert_eq "screen disconnect signal -> DISCONNECTED" "$MONITOR_STATE_DISCONNECTED" "$MONITOR_STATE"
-    monitor_tick
-    assert_eq "screen DISCONNECTED -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-}
-
-wrong_place_to_recovering() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    WRONG_PLACE=true
-    monitor_tick
-    assert_eq "wrong place -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "wrong place reason" "wrong_place_detected" "$MONITOR_RECOVERY_REASON"
-}
-
-recovery_uses_backoff() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_RECOVERING"
-    MONITOR_RECOVERY_REASON="process_missing"
-    monitor_tick
-    assert_eq "recovery fail increments backoff" "1" "$RUNTIME_BACKOFF_FAILURES"
-    assert_eq "recovery backoff sleep" "5 3" "$SLEEP_LOG"
-    assert_eq "recovery launched" "1" "$LAUNCH_COUNT"
-    assert_eq "recovery -> LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-}
-
-failure_threshold_to_cooldown() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_RECOVERING"
-    MONITOR_RECOVERY_REASON="process_missing"
-    RUNTIME_FAILURE_LIMIT=1
-    monitor_tick
-    assert_eq "failure threshold -> COOLDOWN" "$MONITOR_STATE_COOLDOWN" "$MONITOR_STATE"
-    assert_eq "cooldown does not launch immediately" "0" "$LAUNCH_COUNT"
-}
-
-offline_and_restore() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    NET_OK=false
-    monitor_tick
-    assert_eq "offline -> OFFLINE" "$MONITOR_STATE_OFFLINE" "$MONITOR_STATE"
-    assert_eq "offline no failure count" "0" "$RUNTIME_BACKOFF_FAILURES"
-    NET_OK=true
-    monitor_tick
-    assert_eq "online restored -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-}
-
-periodic_restart_to_recovering() {
+test_periodic_restart_disabled() {
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_IN_GAME"
     IN_GAME=true
@@ -330,304 +257,246 @@ periodic_restart_to_recovering() {
     LAST_RESTART=800
     MONITOR_NOW=1000
     monitor_tick
-    assert_eq "periodic restart -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "periodic does not count as crash" "0" "$RUNTIME_BACKOFF_FAILURES"
+    assert_eq "6 periodic restart force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "6 periodic restart stays IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
 }
 
-anti_afk_only_in_game() {
+test_network_offline_protected() {
     reset_monitor_state
-    ANTI_AFK=true
-    LAST_AFK_TAP=0
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    NET_OK=false
+    monitor_tick
+    assert_eq "7 offline force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "7 offline -> UNKNOWN_ACTIVE" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
+}
+
+test_api_429_protected() {
+    reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_LOADING"
-    monitor_tick
-    assert_eq "no anti-afk in LOADING" "0" "$TAP_COUNT"
-    reset_monitor_state
-    ANTI_AFK=true
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    IN_GAME=true
-    LAST_AFK_TAP=0
-    MONITOR_NOW=1000
-    TAP_ON_LOAD_DONE=true
-    monitor_tick
-    assert_eq "anti-afk in IN_GAME" "1" "$TAP_COUNT"
-}
-
-cooldown_expiry_to_recovering() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_COOLDOWN"
-    RUNTIME_COOLDOWN_ACTIVE=1
-    RUNTIME_COOLDOWN_UNTIL=1100
-    MONITOR_NOW=1000
-    monitor_tick
-    assert_eq "cooldown active no launch" "0" "$LAUNCH_COUNT"
-    assert_eq "cooldown stays COOLDOWN" "$MONITOR_STATE_COOLDOWN" "$MONITOR_STATE"
     MONITOR_NOW=1200
+    LAST_LAUNCH=1000
+    LOADING_STARTED_AT=1000
+    JOIN_LOW_SERVER=true
+    QUEUE=false
     monitor_tick
-    assert_eq "cooldown expire -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "8 API 429/no queue force-stop=0" "0" "$FORCE_STOP_COUNT"
 }
 
-stable_runtime_resets_backoff() {
+test_process_dead_rejoins_without_force_stop() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    IN_GAME=true
-    STABLE_SINCE=900
-    MONITOR_NOW=1000
-    RUNTIME_BACKOFF_FAILURES=2
-    RUNTIME_FAILURE_HISTORY="800 900"
-    monitor_tick
-    assert_eq "stable runtime resets backoff" "0" "$RUNTIME_BACKOFF_FAILURES"
-}
-
-# ── 10 REQUIRED SCENARIOS ───────────────────────────────
-
-# Scenario 1: Process missing: IN_GAME/LOADING -> CRASHED -> RECOVERING -> LAUNCHING/LOADING
-test_scenario_1_process_missing() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
     RUNNING=false
-    monitor_tick
-    assert_eq "Scenario 1: IN_GAME -> CRASHED on process missing" "$MONITOR_STATE_CRASHED" "$MONITOR_STATE"
-    monitor_tick
-    assert_eq "Scenario 1: CRASHED -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    monitor_tick
-    assert_eq "Scenario 1: RECOVERING -> LOADING after launch" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-    assert_eq "Scenario 1: Launch count is 1" "1" "$LAUNCH_COUNT"
+    run_recovery_tick "process_missing"
+    assert_eq "9 process dead force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "9 process dead launch=1" "1" "$LAUNCH_COUNT"
+    assert_eq "9 process dead rejoin=1" "1" "$REJOIN_COUNT"
 }
 
-# Scenario 2: Process alive but Roblox window closed: window missing for threshold -> RECOVERING -> relaunch
-test_scenario_2_window_closed_threshold() {
+test_fresh_disconnect_rejoins_once() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    RUNNING=true
+    DISCONNECT=true
+    run_recovery_tick "disconnect_detected"
+    assert_eq "10 fresh disconnect force-stop=1" "1" "$FORCE_STOP_COUNT"
+    assert_eq "10 fresh disconnect launch=1" "1" "$LAUNCH_COUNT"
+    assert_eq "10 fresh disconnect rejoin=1" "1" "$REJOIN_COUNT"
+}
+
+test_fresh_kick_rejoins_once() {
+    reset_monitor_state
+    DISCONNECT=true
+    run_recovery_tick "kick_detected"
+    assert_eq "11 fresh kick force-stop=1" "1" "$FORCE_STOP_COUNT"
+}
+
+test_app_home_rejoins() {
+    reset_monitor_state
+    APP_HOME=true
+    run_recovery_tick "returned_to_home"
+    assert_eq "12 APP_HOME force-stop=1" "1" "$FORCE_STOP_COUNT"
+    assert_eq "12 APP_HOME launch=1" "1" "$LAUNCH_COUNT"
+}
+
+test_backoff_evidence_expired_cancels() {
+    reset_monitor_state
+    DISCONNECT=true
+    CLEAR_DISCONNECT_ON_SLEEP=true
+    run_recovery_tick "disconnect_detected"
+    assert_eq "13 expired evidence force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "13 expired evidence launch=0" "0" "$LAUNCH_COUNT"
+    assert_contains "13 recovery_cancelled logged" "event=recovery_cancelled" "$LOG_FILE"
+}
+
+test_clone_b_to_h_not_restarted() {
+    local pkg
+    reset_monitor_state
+    LAST_IN_GAME=900
     WINDOW_VISIBLE=false
-    WINDOW_MISSING_THRESHOLD=3
-
-    # Tick 1: window missing count = 1
-    monitor_tick
-    assert_eq "Scenario 2: Tick 1 remains IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
-    assert_eq "Scenario 2: Window missing count is 1" "1" "$WINDOW_MISSING_COUNT"
-
-    # Tick 2: window missing count = 2
-    monitor_tick
-    assert_eq "Scenario 2: Tick 2 remains IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
-    assert_eq "Scenario 2: Window missing count is 2" "2" "$WINDOW_MISSING_COUNT"
-
-    # Tick 3: window missing count reaches threshold 3 -> triggers RECOVERING (window_closed)
-    monitor_tick
-    assert_eq "Scenario 2: Tick 3 reaches threshold -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "Scenario 2: Recovery reason is window_closed" "window_closed" "$MONITOR_RECOVERY_REASON"
-
-    # Next tick: recovers and relaunches
-    monitor_tick
-    assert_eq "Scenario 2: Recovery relaunches -> LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-    assert_eq "Scenario 2: Force stop executed" "1" "$FORCE_STOP_COUNT"
-    assert_eq "Scenario 2: Launch executed" "1" "$LAUNCH_COUNT"
-    assert_contains "Scenario 2: window_closed_detected logged" 'event=window_closed_detected' "$LOG_FILE"
+    WINDOW_MISSING_THRESHOLD=1
+    for pkg in B C D E F G H; do
+        ROBLOX_PACKAGE="com.roblox.clone${pkg}"
+        MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+        monitor_tick
+    done
+    assert_eq "20 B-H unfocused clones force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "20 B-H unfocused clones launch=0" "0" "$LAUNCH_COUNT"
 }
 
-# Scenario 3: Process alive + Roblox Home/Lobby -> NOT IN_GAME
-test_scenario_3_lobby_not_in_game() {
+test_same_package_lock_allows_one_monitor() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LOADING"
-    MONITOR_NOW=1070
-    LAST_LAUNCH=1000
-    LAUNCH_GRACE=60
-    LOADING_STARTED_AT=1000
-    IN_GAME_TIMEOUT=120
-    RUNNING=true
-    WINDOW_VISIBLE=true
-    IN_GAME=false
-
-    monitor_tick
-    assert_eq "Scenario 3: Lobby process stays in LOADING, NOT in game" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-    assert_contains "Scenario 3: lobby_detected logged" 'event=lobby_detected' "$LOG_FILE"
+    local lock_root="${TEST_TMP}/locks_case"
+    RUNTIME_LOCK_USE_FLOCK=false
+    runtime_lock_acquire "$lock_root" "com.roblox.client" "$LOG_FILE" >/dev/null 2>&1
+    local first="$?"
+    runtime_lock_acquire "$lock_root" "com.roblox.client" "$LOG_FILE" >/dev/null 2>&1
+    local second="$?"
+    runtime_lock_release "$LOG_FILE" "com.roblox.client"
+    assert_eq "21 first monitor lock ok" "0" "$first"
+    assert_eq "21 second monitor lock denied" "1" "$second"
 }
 
-# Scenario 4: Lobby stays longer than IN_GAME_TIMEOUT -> lobby retry
-test_scenario_4_lobby_timeout_retry() {
+test_visibility_unknown_returns_to_in_game() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LOADING"
-    LOADING_STARTED_AT=1000
-    MONITOR_NOW=1200
-    LAST_LAUNCH=1000
-    IN_GAME_TIMEOUT=120
-    RUNNING=true
-    WINDOW_VISIBLE=true
-    IN_GAME=false
-    LOBBY_RETRY_COUNT=0
-    LOBBY_RETRY_LIMIT=3
-
+    LAST_IN_GAME=900
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    WINDOW_VISIBLE=false
+    WINDOW_MISSING_THRESHOLD=1
     monitor_tick
-    assert_eq "Scenario 4: Lobby timeout triggers RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "Scenario 4: Recovery reason is lobby_deeplink_retry" "lobby_deeplink_retry" "$MONITOR_RECOVERY_REASON"
-    assert_eq "Scenario 4: LOBBY_RETRY_COUNT incremented to 1" "1" "$LOBBY_RETRY_COUNT"
-    assert_eq "Scenario 4: LOW_SERVER_RETRY_OFFSET incremented to 1" "1" "$LOW_SERVER_RETRY_OFFSET"
-    assert_contains "Scenario 4: lobby_timeout logged" 'event=lobby_timeout' "$LOG_FILE"
-    assert_contains "Scenario 4: lobby_retry logged" 'event=lobby_retry' "$LOG_FILE"
-}
-
-# Scenario 5: Lobby retry counter: 1 -> 2 -> 3 (must NOT reset during recovery)
-test_scenario_5_lobby_retry_counter_preserved() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LOADING"
-    LOADING_STARTED_AT=1000
-    MONITOR_NOW=1200
-    IN_GAME_TIMEOUT=120
-    RUNNING=true
-    IN_GAME=false
-    LOBBY_RETRY_COUNT=0
-    LOBBY_RETRY_LIMIT=3
-
-    # Attempt 1: Loading -> Recovering
-    monitor_tick
-    assert_eq "Scenario 5: Attempt 1 sets retry=1" "1" "$LOBBY_RETRY_COUNT"
-    # Recovery tick
-    monitor_tick
-    assert_eq "Scenario 5: Recovery preserves retry=1" "1" "$LOBBY_RETRY_COUNT"
-    assert_eq "Scenario 5: State after recovery is LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-
-    # Attempt 2: Loading -> Recovering
-    MONITOR_NOW=1400
-    LOADING_STARTED_AT=1200
-    monitor_tick
-    assert_eq "Scenario 5: Attempt 2 sets retry=2" "2" "$LOBBY_RETRY_COUNT"
-    monitor_tick
-    assert_eq "Scenario 5: Recovery preserves retry=2" "2" "$LOBBY_RETRY_COUNT"
-
-    # Attempt 3: Loading -> Recovering (retry=3)
-    MONITOR_NOW=1600
-    LOADING_STARTED_AT=1400
-    monitor_tick
-    assert_eq "Scenario 5: Attempt 3 sets retry=3" "3" "$LOBBY_RETRY_COUNT"
-    monitor_tick
-    assert_eq "Scenario 5: Recovery preserves retry=3" "3" "$LOBBY_RETRY_COUNT"
-
-    # Attempt 4: Limit (3) reached -> escalates to loading_timeout
-    MONITOR_NOW=1800
-    LOADING_STARTED_AT=1600
-    monitor_tick
-    assert_eq "Scenario 5: Attempt 4 escalates to loading_timeout" "loading_timeout" "$MONITOR_RECOVERY_REASON"
-}
-
-# Scenario 6: Confirmed successful gameplay -> LOBBY_RETRY_COUNT=0, LOW_SERVER_RETRY_OFFSET=0
-test_scenario_6_gameplay_resets_counters() {
-    reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_LOADING"
-    MONITOR_NOW=2000
-    LAST_LAUNCH=1000
-    LOADING_STARTED_AT=1000
-    LOBBY_RETRY_COUNT=2
-    LOW_SERVER_RETRY_OFFSET=2
-    WINDOW_MISSING_COUNT=2
-    RUNNING=true
-    WINDOW_VISIBLE=true
+    assert_eq "22 IN_GAME -> UNKNOWN_ACTIVE" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
     IN_GAME=true
-
     monitor_tick
-    assert_eq "Scenario 6: Transitions to IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
-    assert_eq "Scenario 6: LOBBY_RETRY_COUNT reset to 0" "0" "$LOBBY_RETRY_COUNT"
-    assert_eq "Scenario 6: LOW_SERVER_RETRY_OFFSET reset to 0" "0" "$LOW_SERVER_RETRY_OFFSET"
-    assert_eq "Scenario 6: WINDOW_MISSING_COUNT reset to 0" "0" "$WINDOW_MISSING_COUNT"
-    assert_eq "Scenario 6: LAST_IN_GAME updated to current timestamp" "2000" "$LAST_IN_GAME"
-    assert_contains "Scenario 6: game_session_confirmed logged" 'event=game_session_confirmed' "$LOG_FILE"
+    assert_eq "22 UNKNOWN_ACTIVE -> IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
 }
 
-# Scenario 7: Freeform window closed -> relaunch with correct package and bounds
-test_scenario_7_freeform_window_closed() {
+test_in_game_to_disconnected_requires_fresh() {
     reset_monitor_state
-    ROBLOX_PACKAGE="com.roblox.client_clone1"
     MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    RUNNING=true
-    WINDOW_VISIBLE=false
-    WINDOW_MISSING_THRESHOLD=1
-
-    monitor_tick
-    assert_eq "Scenario 7: Freeform window missing triggers RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "Scenario 7: Recovery reason is window_closed" "window_closed" "$MONITOR_RECOVERY_REASON"
-
-    monitor_tick
-    assert_eq "Scenario 7: Relaunched to LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
-    assert_eq "Scenario 7: Launch was called for correct package" "1" "$LAUNCH_COUNT"
-}
-
-# Scenario 8: Multiple Roblox clones: closing clone A must not trigger or reopen clone B
-test_scenario_8_multiple_clones_isolation() {
-    reset_monitor_state
-
-    # Instance 1: Monitoring Clone A
-    ROBLOX_PACKAGE="com.roblox.cloneA"
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    RUNNING=true
-    WINDOW_VISIBLE=false
-    WINDOW_MISSING_THRESHOLD=1
-    monitor_tick
-    assert_eq "Scenario 8: Clone A detects missing window" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-
-    # Instance 2: Monitoring Clone B (Window is visible)
-    ROBLOX_PACKAGE="com.roblox.cloneB"
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    RUNNING=true
-    WINDOW_VISIBLE=true
     IN_GAME=true
-    WINDOW_MISSING_COUNT=0
+    DISCONNECT=false
     monitor_tick
-    assert_eq "Scenario 8: Clone B remains unaffected in IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
-    assert_eq "Scenario 8: Clone B window missing count is 0" "0" "$WINDOW_MISSING_COUNT"
+    assert_eq "23 no fresh disconnect stays IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    DISCONNECT=true
+    monitor_tick
+    assert_eq "23 fresh disconnect -> DISCONNECTED" "$MONITOR_STATE_DISCONNECTED" "$MONITOR_STATE"
 }
 
-# Scenario 9: Background process exists but task/window does not -> WINDOW_CLOSED, not IN_GAME
-test_scenario_9_background_process_no_window() {
+test_loading_timeout_unconfirmed_no_force() {
     reset_monitor_state
-    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
-    RUNNING=true
-    WINDOW_VISIBLE=false
-    IN_GAME=false
-
-    # Verify that without window, state cannot be maintained as stable gameplay
-    WINDOW_MISSING_THRESHOLD=1
+    MONITOR_STATE="$MONITOR_STATE_LOADING"
+    MONITOR_NOW=1300
+    LAST_LAUNCH=1000
+    LOADING_STARTED_AT=1000
     monitor_tick
-    assert_eq "Scenario 9: Ghost process without window is not IN_GAME" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "Scenario 9: Reason is window_closed" "window_closed" "$MONITOR_RECOVERY_REASON"
+    assert_eq "24 LOADING timeout force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "24 LOADING timeout -> UNKNOWN_ACTIVE" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
 }
 
-# Scenario 10: am start returns success but no window appears -> launch verification fails and enters normal backoff/recovery
-test_scenario_10_launch_verification_failure() {
+test_rejoin_count_only_after_gate() {
+    reset_monitor_state
+    run_recovery_tick "loading_timeout"
+    assert_eq "25 cancelled recovery rejoin=0" "0" "$REJOIN_COUNT"
+    DISCONNECT=true
+    run_recovery_tick "disconnect_detected"
+    assert_eq "25 authorized recovery rejoin=1" "1" "$REJOIN_COUNT"
+}
+
+test_startup_dead_process_launches() {
+    reset_monitor_state
+    RUNNING=false
+    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
+    monitor_tick
+    assert_eq "startup process dead -> LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
+    assert_eq "startup launch count" "1" "$LAUNCH_COUNT"
+}
+
+test_launch_failure_without_gate_stays_protected() {
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
     LAUNCH_OK=false
-
     monitor_tick
-    assert_eq "Scenario 10: Launch verification failure -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
-    assert_eq "Scenario 10: Recovery reason is launch_failed" "launch_failed" "$MONITOR_RECOVERY_REASON"
-    assert_eq "Scenario 10: Did not count as successful launch" "0" "$LAUNCH_COUNT"
+    assert_eq "launch while active protected" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
+    assert_eq "launch while active count=0" "0" "$LAUNCH_COUNT"
 }
 
-startup_to_launching
-launch_success_to_loading
-launch_failure_to_recovering
-game_activity_to_in_game
-process_missing_to_crashed
-disconnect_to_recovering
-screen_disconnect_to_recovering
-wrong_place_to_recovering
-recovery_uses_backoff
-failure_threshold_to_cooldown
-offline_and_restore
-periodic_restart_to_recovering
-anti_afk_only_in_game
-cooldown_expiry_to_recovering
-stable_runtime_resets_backoff
+test_screen_disconnect_authorized() {
+    reset_monitor_state
+    SCREEN_DISCONNECT=true
+    run_recovery_tick "screen_disconnect"
+    assert_eq "screen disconnect force-stop=1" "1" "$FORCE_STOP_COUNT"
+}
 
-test_scenario_1_process_missing
-test_scenario_2_window_closed_threshold
-test_scenario_3_lobby_not_in_game
-test_scenario_4_lobby_timeout_retry
-test_scenario_5_lobby_retry_counter_preserved
-test_scenario_6_gameplay_resets_counters
-test_scenario_7_freeform_window_closed
-test_scenario_8_multiple_clones_isolation
-test_scenario_9_background_process_no_window
-test_scenario_10_launch_verification_failure
+test_wrong_place_goes_to_recovery_but_gate_protects_without_evidence() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    WRONG_PLACE=true
+    monitor_tick
+    assert_eq "wrong place requests recovery" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    WRONG_PLACE=false
+    monitor_tick
+    assert_eq "wrong place stale evidence force-stop=0" "0" "$FORCE_STOP_COUNT"
+}
+
+test_queue_without_disconnect_cannot_force_stop() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_LOADING"
+    MONITOR_NOW=1020
+    LAST_LAUNCH=900
+    LOADING_STARTED_AT=900
+    JOIN_LOW_SERVER=true
+    QUEUE=true
+    monitor_tick
+    assert_eq "queue requests recovery" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    monitor_tick
+    assert_eq "queue alone force-stop=0" "0" "$FORCE_STOP_COUNT"
+}
+
+test_cooldown_expired_rechecks_gate() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_COOLDOWN"
+    RUNTIME_COOLDOWN_ACTIVE=1
+    RUNTIME_COOLDOWN_UNTIL=900
+    monitor_tick
+    assert_eq "cooldown expired -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    monitor_tick
+    assert_eq "cooldown expired active process force-stop=0" "0" "$FORCE_STOP_COUNT"
+}
+
+test_anti_afk_only_when_confirmed() {
+    reset_monitor_state
+    ANTI_AFK=true
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    IN_GAME=true
+    TAP_ON_LOAD_DONE=true
+    LAST_AFK_TAP=0
+    MONITOR_NOW=1000
+    monitor_tick
+    assert_eq "anti-afk tap in confirmed game" "1" "$TAP_COUNT"
+}
+
+test_protected_in_game_latch
+test_not_top_activity_protected
+test_no_window_record_protected
+test_executor_overlay_protected
+test_in_game_timeout_protected
+test_periodic_restart_disabled
+test_network_offline_protected
+test_api_429_protected
+test_process_dead_rejoins_without_force_stop
+test_fresh_disconnect_rejoins_once
+test_fresh_kick_rejoins_once
+test_app_home_rejoins
+test_backoff_evidence_expired_cancels
+test_clone_b_to_h_not_restarted
+test_same_package_lock_allows_one_monitor
+test_visibility_unknown_returns_to_in_game
+test_in_game_to_disconnected_requires_fresh
+test_loading_timeout_unconfirmed_no_force
+test_rejoin_count_only_after_gate
+test_startup_dead_process_launches
+test_launch_failure_without_gate_stays_protected
+test_screen_disconnect_authorized
+test_wrong_place_goes_to_recovery_but_gate_protects_without_evidence
+test_queue_without_disconnect_cannot_force_stop
+test_cooldown_expired_rechecks_gate
+test_anti_afk_only_when_confirmed
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

@@ -175,7 +175,7 @@ progress_bar 2 4 "Đang cập nhật script..."
 download_or_keep_local "$SCRIPT_URL" "auto_rejoin.sh" "auto_rejoin.sh" || exit 1
 progress_bar 4 4 "Hoàn tất!"
 mkdir -p lib
-for lib_file in config.sh android.sh network.sh logger.sh runtime.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh; do
+for lib_file in config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh; do
     LIB_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/lib/${lib_file}"
     download_or_keep_local "$LIB_URL" "lib/${lib_file}" "lib/${lib_file}" || true
 done

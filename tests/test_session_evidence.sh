@@ -58,7 +58,7 @@ res="$(session_classify "$ev_game_active")"
 assert_state "Scenario 1: Active Game" "GAME_ACTIVE" "$res"
 
 
-echo "=== Scenario 2: Closed Freeform Window (Process Running, Stale Task) ==="
+echo "=== Scenario 2: Freeform Visibility Unknown (Process Running, Stale Task) ==="
 ev_window_closed="process_alive=true
 task_present=true
 window_record=false
@@ -73,7 +73,7 @@ network_online=true
 expected_place=123456789"
 
 res="$(session_classify "$ev_window_closed")"
-assert_state "Scenario 2: Closed Freeform Window" "WINDOW_CLOSED" "$res"
+assert_state "Scenario 2: Freeform Visibility Unknown" "UNKNOWN" "$res"
 
 
 echo "=== Scenario 3: Roblox Home Screen (MainActivity, No Active Game) ==="
