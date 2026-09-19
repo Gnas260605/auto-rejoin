@@ -241,32 +241,30 @@ echo -e "${BGRN}╔════════════════════�
 echo -e "${BGRN}║  [BƯỚC 3/4] Phát hiện phương thức hệ thống      ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
 progress_bar 1 3 "Kiểm tra Root (su)..."
+export PATH="${PATH:-}:/system/bin:/system/xbin:/sbin:/vendor/bin:/data/local/tmp"
 EXECUTOR_TYPE="direct"
-if declare -F android_detect_executor >/dev/null 2>&1; then
+
+if [ -n "${FORCE_EXECUTOR:-}" ]; then
+    EXECUTOR_TYPE="$FORCE_EXECUTOR"
+elif command -v su >/dev/null 2>&1 || [ -x /system/xbin/su ] || [ -x /system/bin/su ] || [ -x /sbin/su ] || command -v tsu >/dev/null 2>&1; then
+    EXECUTOR_TYPE="su"
+elif declare -F android_detect_executor >/dev/null 2>&1; then
     EXECUTOR_TYPE="$(android_detect_executor)"
 fi
+
 if [ "$EXECUTOR_TYPE" = "su" ]; then
-    EXECUTOR_TYPE="su"
     progress_bar 3 3 "Đã phát hiện!"
     echo -e "  ${BGRN}✓ Đã phát hiện quyền Root (su)${NC}"
+    export ANDROID_EXECUTOR="su"
+elif [ "$EXECUTOR_TYPE" = "adb" ] || command -v adb >/dev/null 2>&1; then
+    EXECUTOR_TYPE="adb"
+    progress_bar 3 3 "Đã phát hiện!"
+    echo -e "  ${BGRN}✓ Đã phát hiện ADB shell${NC}"
+    export ANDROID_EXECUTOR="adb"
 else
-    progress_bar 2 3 "Kiểm tra ADB..."
-    if [ "$EXECUTOR_TYPE" = "adb" ]; then
-        EXECUTOR_TYPE="adb"
-        progress_bar 3 3 "Đã phát hiện!"
-        echo -e "  ${BGRN}✓ Đã phát hiện ADB shell${NC}"
-    elif ! declare -F android_detect_executor >/dev/null 2>&1 && command -v su > /dev/null 2>&1 && run_with_timeout 2 su -c "id" > /dev/null 2>&1; then
-        EXECUTOR_TYPE="su"
-        progress_bar 3 3 "Đã phát hiện!"
-        echo -e "  ${BGRN}✓ Đã phát hiện quyền Root (su)${NC}"
-    elif ! declare -F android_detect_executor >/dev/null 2>&1 && command -v adb > /dev/null 2>&1 && run_with_timeout 2 adb shell "id" > /dev/null 2>&1; then
-        EXECUTOR_TYPE="adb"
-        progress_bar 3 3 "Đã phát hiện!"
-        echo -e "  ${BGRN}✓ Đã phát hiện ADB shell${NC}"
-    else
-        progress_bar 3 3 "Che do direct"
-        echo -e "  ${YLW}⚠ Không có root/adb, chạy chế độ direct (hạn chế)${NC}"
-    fi
+    progress_bar 3 3 "Che do direct"
+    echo -e "  ${YLW}⚠ Không có root/adb, chạy chế độ direct (hạn chế)${NC}"
+    export ANDROID_EXECUTOR="direct"
 fi
 echo ""
 
@@ -464,6 +462,7 @@ LOW_SERVER_MAX_PLAYERS=$LOW_SERVER_MAX_PLAYERS
 LOW_SERVER_STRICT=$LOW_SERVER_STRICT
 ALLOW_UNSCOPED_DEEPLINK=$ALLOW_UNSCOPED_DEEPLINK
 ALLOW_HOME_FALLBACK=$ALLOW_HOME_FALLBACK
+EXECUTOR="$EXECUTOR_TYPE"
 EOF
 
     progress_bar $COUNT $TOTAL "Khởi động acc $COUNT/$TOTAL..."
