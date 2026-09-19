@@ -839,10 +839,19 @@ check_roblox_log_for_disconnect() {
     if [ -n "$mtime" ] && [ "$mtime" -lt "${LAST_LAUNCH:-0}" ]; then
         return 1
     fi
+    # After a confirmed in-game tick, ignore old connect-failure lines left in the log tail.
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ] && [ -n "$mtime" ] && [ "$mtime" -lt "${LAST_IN_GAME:-0}" ]; then
+        return 1
+    fi
 
     # Chỉ đọc 25 dòng mới nhất (thay vì 150 dòng cũ) để tránh đọc trúng lỗi disconnect cũ của các session trước
+    local tail_count=25
+    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
+        tail_count=8
+    fi
+
     local log_tail
-    log_tail=$(android_tail_lines 25 "$log_dir/$latest_log" 2>/dev/null)
+    log_tail=$(android_tail_lines "$tail_count" "$log_dir/$latest_log" 2>/dev/null)
     [ -z "$log_tail" ] && return 1
 
     # Chỉ bắt các chuỗi lỗi ngắt kết nối / kick thực sự từ máy chủ Roblox, không bắt các từ khóa thông thường
