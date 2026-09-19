@@ -846,7 +846,7 @@ check_roblox_log_for_disconnect() {
     [ -z "$log_tail" ] && return 1
 
     # Chỉ bắt các chuỗi lỗi ngắt kết nối / kick thực sự từ máy chủ Roblox, không bắt các từ khóa thông thường
-    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(267|277|279|288)|you have been kicked|kicked from this game|server was shut down|server has shut down"; then
+    if echo "$log_tail" | grep -E -i -q "lost connection to the game|connection lost: error code|disconnected from server|error code[:= ]*(267|277|279|288)|failed to connect|no response from server|unknown status|you have been kicked|kicked from this game|server was shut down|server has shut down"; then
         return 0
     fi
 
