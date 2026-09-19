@@ -17,10 +17,19 @@ android_with_timeout() {
     fi
 }
 
+export PATH="${PATH:-}:/system/bin:/system/xbin:/sbin:/vendor/bin"
+
 android_detect_executor() {
-    if command -v su >/dev/null 2>&1 && android_with_timeout 2 su -c id >/dev/null 2>&1; then
+    export PATH="${PATH:-}:/system/bin:/system/xbin:/sbin:/vendor/bin"
+    if command -v su >/dev/null 2>&1 && android_with_timeout 3 su -c id >/dev/null 2>&1; then
         echo "su"
-    elif command -v adb >/dev/null 2>&1 && android_with_timeout 2 adb shell id >/dev/null 2>&1; then
+    elif [ -x /system/xbin/su ] && android_with_timeout 3 /system/xbin/su -c id >/dev/null 2>&1; then
+        echo "su"
+    elif [ -x /system/bin/su ] && android_with_timeout 3 /system/bin/su -c id >/dev/null 2>&1; then
+        echo "su"
+    elif command -v tsu >/dev/null 2>&1 && android_with_timeout 3 tsu -c id >/dev/null 2>&1; then
+        echo "su"
+    elif command -v adb >/dev/null 2>&1 && android_with_timeout 3 adb shell id >/dev/null 2>&1; then
         echo "adb"
     else
         echo "direct"
@@ -77,9 +86,15 @@ android_exec() {
     executor="$(android_get_executor)"
     case "$executor" in
         su)
-            # Many Android su implementations only preserve root via `su -c`.
-            # Keep all command-string construction centralized and shell-quote each argv.
-            su -c "$(android_shell_quote "$command_name" "$@")"
+            local su_bin="su"
+            if ! command -v su >/dev/null 2>&1; then
+                if [ -x /system/xbin/su ]; then su_bin="/system/xbin/su"
+                elif [ -x /system/bin/su ]; then su_bin="/system/bin/su"
+                elif [ -x /sbin/su ]; then su_bin="/sbin/su"
+                elif command -v tsu >/dev/null 2>&1; then su_bin="tsu"
+                fi
+            fi
+            $su_bin -c "$(android_shell_quote "$command_name" "$@")"
             ;;
         adb)
             adb shell "$command_name" "$@"
