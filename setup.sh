@@ -71,15 +71,14 @@ download_or_keep_local() {
 # ── Progress bar ─────────────────────────────────────────
 progress_bar() {
     local current=$1 total=$2 label="${3:-}"
-    local width=40
+    local width=30
     local filled=$(( current * width / total ))
     local empty=$(( width - filled ))
     local bar=""
     local i
     for (( i=0; i<filled; i++ )); do bar+="█"; done
     for (( i=0; i<empty; i++ )); do bar+="░"; done
-    printf "\r  ${BGRN}[${bar}]${NC} ${YLW}%3d%%${NC} %s" $(( current * 100 / total )) "$label"
-    [ "$current" -eq "$total" ] && echo ""
+    printf "\r\033[K  ${BGRN}[${bar}]${NC} ${YLW}%3d%%${NC} %s\n" $(( current * 100 / total )) "$label"
 }
 
 clear
@@ -478,18 +477,17 @@ EOF
         "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
 
     UNAME_DISPLAY="${SAVED_USERNAME:-N/A}"
-    printf "${BGRN}|${NC}  ${BGRN}*${NC} Acc ${YLW}%2d${NC}: ${CYN}%-28s${NC} ${GRN}%-12s${NC}${BGRN}|${NC}\n" \
+    printf "  ${BGRN}✓${NC} Acc ${YLW}%2d${NC}: ${CYN}%-26s${NC} ${GRN}%-10s${NC}\n" \
         "$COUNT" "$PKG" "[$UNAME_DISPLAY]"
     COUNT=$((COUNT+1))
 
     # Chờ 10s trước khi mở tab tiếp theo (trừ tab cuối cùng)
     if [ $COUNT -le $TOTAL ]; then
-        printf "  ${YLW}⏳ Chờ 10s trước khi mở acc tiếp theo:${NC} "
         for i in 10 9 8 7 6 5 4 3 2 1; do
-            printf "${YLW}%d...${NC} " $i
+            printf "\r\033[K  ${YLW}⏳ Chờ %ds trước khi mở acc tiếp theo...${NC}" "$i"
             sleep 1
         done
-        echo ""
+        printf "\r\033[K"
     fi
 done
 
