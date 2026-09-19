@@ -96,6 +96,14 @@ assert_eq "clone slot 1 gets 2nd smallest server" "job-server-smallest-2|1|50" "
 server_slot_2="$(roblox_pick_low_server 189707 2 1 0)"
 assert_eq "clone slot 2 gets 3rd smallest server" "job-server-small-3|2|50" "$server_slot_2"
 
+# Reserved jobs are fed through the same skip-list path as failed jobs so the
+# next clone does not reuse a JobId that another package has just selected.
+server_skip_reserved="$(roblox_pick_low_server 189707 0 1 0 "job-server-smallest-1")"
+assert_eq "reserved job is skipped by next clone" "job-server-smallest-2|1|50" "$server_skip_reserved"
+
+server_skip_two_reserved="$(roblox_pick_low_server 189707 0 1 0 "job-server-smallest-1,job-server-smallest-2")"
+assert_eq "multiple reserved jobs are skipped" "job-server-small-3|2|50" "$server_skip_two_reserved"
+
 # 5. Fallback test when API returns empty or invalid
 roblox_fetch_public_servers() {
     printf '{"data":[]}\n'

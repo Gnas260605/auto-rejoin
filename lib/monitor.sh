@@ -109,6 +109,35 @@ monitor_recovery_is_authorized() {
     return 1
 }
 
+monitor_force_stop_package() {
+    local package="${1:-$ROBLOX_PACKAGE}"
+    local reason="${2:-unspecified}"
+    local mode="${3:-recovery}"
+
+    if declare -F android_validate_package >/dev/null 2>&1; then
+        android_validate_package "$package" || return 2
+    elif ! printf '%s' "$package" | grep -Eq '^[A-Za-z0-9_.]+$'; then
+        return 2
+    fi
+
+    if [ "$mode" = "manual" ]; then
+        log_event WARN force_stop_manual "$LOG_FILE" package "$package" reason "$reason"
+        android_force_stop "$package" >/dev/null 2>&1
+        return $?
+    fi
+
+    if ! monitor_recovery_is_authorized "$reason"; then
+        return 1
+    fi
+
+    if [ "$MONITOR_RECOVERY_AUTHORIZED_BY" = "process_dead" ]; then
+        return 0
+    fi
+
+    log_event INFO force_stop_authorized "$LOG_FILE" package "$package" reason "$reason" authorized_by "$MONITOR_RECOVERY_AUTHORIZED_BY"
+    android_force_stop "$package" >/dev/null 2>&1
+}
+
 monitor_cancel_recovery() {
     local reason="${1:-active_session_protected}"
     MONITOR_RECOVERY_REASON=""
@@ -463,15 +492,12 @@ monitor_handle_recovering() {
         return 0
     fi
 
-    if ! monitor_recovery_is_authorized "$reason"; then
+    if ! monitor_force_stop_package "$ROBLOX_PACKAGE" "$reason" "recovery"; then
         monitor_cancel_recovery "active_session_protected"
         return 0
     fi
 
     log_event INFO recovery_attempt "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason" authorized_by "$MONITOR_RECOVERY_AUTHORIZED_BY"
-    if [ "$MONITOR_RECOVERY_AUTHORIZED_BY" != "process_dead" ]; then
-        android_force_stop "$ROBLOX_PACKAGE" >/dev/null 2>&1
-    fi
     monitor_sleep "${LOBBY_RETRY_DELAY:-3}"
     [ "$count_rejoin" = "true" ] && inc_rejoin_count "$ROBLOX_PACKAGE"
     STABLE_SINCE=0

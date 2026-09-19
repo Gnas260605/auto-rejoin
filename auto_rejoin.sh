@@ -266,9 +266,11 @@ get_roblox_username() {
         "/sdcard/Hydrogen/workspace/roblox_username.txt"
     )
     for ufp in "${user_file_paths[@]}"; do
-        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+
 ')" ]; then
-            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+
  ')
             [ -n "$uname" ] && break
         fi
@@ -277,16 +279,19 @@ get_roblox_username() {
     # 2. Đọc từ file Log Roblox (hoạt động kể cả không root)
     if [ -z "$uname" ]; then
         local log_dir=""
-        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
+        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
+
 ')" ]; then
             log_dir="/sdcard/Android/data/$pkg/files/logs"
-        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
+        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
+
 ')" ]; then
             log_dir="/data/data/$pkg/files/logs"
         fi
         if [ -n "$log_dir" ]; then
             local latest_log
-            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
+            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
+
 ')
             if [ -n "$latest_log" ]; then
                 local log_sample
@@ -319,7 +324,8 @@ get_roblox_username() {
 
             if [ -z "$uname" ]; then
                 local db_file
-                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '')
+                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '
+')
                 if [ -n "$db_file" ]; then
                     uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
                 fi
@@ -503,9 +509,11 @@ get_roblox_username() {
         "/sdcard/Hydrogen/workspace/roblox_username.txt"
     )
     for ufp in "${user_file_paths[@]}"; do
-        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+
 ')" ]; then
-            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+
  ')
             [ -n "$uname" ] && break
         fi
@@ -514,16 +522,19 @@ get_roblox_username() {
     # 2. Đọc từ file Log Roblox (hoạt động kể cả không root)
     if [ -z "$uname" ]; then
         local log_dir=""
-        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
+        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
+
 ')" ]; then
             log_dir="/sdcard/Android/data/$pkg/files/logs"
-        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
+        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
+
 ')" ]; then
             log_dir="/data/data/$pkg/files/logs"
         fi
         if [ -n "$log_dir" ]; then
             local latest_log
-            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
+            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
+
 ')
             if [ -n "$latest_log" ]; then
                 local log_sample
@@ -556,7 +567,8 @@ get_roblox_username() {
 
             if [ -z "$uname" ]; then
                 local db_file
-                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '')
+                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '
+')
                 if [ -n "$db_file" ]; then
                     uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
                 fi
@@ -664,9 +676,9 @@ low_server_failed_jobs_file() {
     printf '%s/low_server_failed_%s.jobs\n' "$TMP_DIR" "$safe_place"
 }
 
-low_server_prune_failed_jobs() {
+low_server_prune_jobs() {
     local file="$1"
-    local ttl="${FAILED_JOB_TTL:-300}"
+    local ttl="${2:-${FAILED_JOB_TTL:-300}}"
     local now tmp
     now=$(date +%s)
     tmp="${file}.tmp"
@@ -675,12 +687,54 @@ low_server_prune_failed_jobs() {
     mv "$tmp" "$file" 2>/dev/null || true
 }
 
+low_server_prune_failed_jobs() {
+    low_server_prune_jobs "$1" "${FAILED_JOB_TTL:-300}"
+}
+
 low_server_failed_jobs_csv() {
     local file
     file="$(low_server_failed_jobs_file)"
     low_server_prune_failed_jobs "$file"
     [ -f "$file" ] || return 0
     awk -F'|' 'NF >= 1 && $1 != "" { print $1 }' "$file" | sort -u | paste -sd, -
+}
+
+low_server_reserved_jobs_file() {
+    local safe_place="${PLACE_ID:-unknown}"
+    safe_place="${safe_place//[^A-Za-z0-9_]/_}"
+    printf '%s/low_server_reserved_%s.jobs\n' "$TMP_DIR" "$safe_place"
+}
+
+low_server_reserved_jobs_csv() {
+    local file
+    file="$(low_server_reserved_jobs_file)"
+    low_server_prune_jobs "$file" "${LOW_SERVER_RESERVATION_TTL:-180}"
+    [ -f "$file" ] || return 0
+    awk -F'|' 'NF >= 1 && $1 != "" { print $1 }' "$file" | sort -u | paste -sd, -
+}
+
+low_server_join_csv() {
+    printf '%s\n%s\n' "${1:-}" "${2:-}" \
+        | tr ',' '\n' \
+        | sed '/^[[:space:]]*$/d' \
+        | sort -u \
+        | paste -sd, -
+}
+
+low_server_reserve_job() {
+    local job="$1"
+    local reason="${2:-reserved}"
+    local file now ttl
+    [ -n "$job" ] || return 0
+    file="$(low_server_reserved_jobs_file)"
+    ttl="${LOW_SERVER_RESERVATION_TTL:-180}"
+    now=$(date +%s)
+    mkdir -p "$TMP_DIR" 2>/dev/null || true
+    low_server_prune_jobs "$file" "$ttl"
+    grep -v "^${job}|" "$file" 2>/dev/null > "${file}.tmp" || true
+    printf '%s|%s|%s|%s\n' "$job" "$now" "$ROBLOX_PACKAGE" "$reason" >> "${file}.tmp"
+    mv "${file}.tmp" "$file" 2>/dev/null || true
+    log_event INFO low_server_job_reserved "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" job "$job" ttl "$ttl" reason "$reason"
 }
 
 low_server_mark_current_failed() {
@@ -730,8 +784,10 @@ launch_roblox() {
             idx=$((idx + retry_offset))
             local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
             local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
-            local failed_jobs
+            local failed_jobs reserved_jobs
             failed_jobs="$(low_server_failed_jobs_csv 2>/dev/null || true)"
+            reserved_jobs="$(low_server_reserved_jobs_csv 2>/dev/null || true)"
+            failed_jobs="$(low_server_join_csv "$failed_jobs" "$reserved_jobs")"
             log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
             local server_info
             server_info="$(roblox_pick_low_server "$PLACE_ID" "$idx" "$min_p" "$max_p" "$failed_jobs" "${LOW_SERVER_MAX_PAGES:-5}" 2>/dev/null || true)"
@@ -748,6 +804,7 @@ launch_roblox() {
                 CURRENT_LOW_SERVER_JOB="$chosen_job"
                 CURRENT_LOW_SERVER_PLAYING="$chosen_playing"
                 CURRENT_LOW_SERVER_MAX="$chosen_max"
+                low_server_reserve_job "$chosen_job" "launch_selected"
                 log_msg "${BGRN}[LOW_SERVER]${NC} Đã chọn Server #$((idx + 1)): ${YLW}${chosen_playing}/${chosen_max} players${NC} (Job: ${chosen_job:0:8}...)"
                 link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || {
                     log_msg "${RED}[LAUNCH]${NC} Place ID hoặc Job ID không hợp lệ."
@@ -755,12 +812,9 @@ launch_roblox() {
                 }
             else
                 if [ "${LOW_SERVER_STRICT:-false}" = "true" ]; then
-                    log_msg "${YLW}[LOW_SERVER]${NC} API server ít người không khả dụng/rate-limit; vẫn mở đúng Place ID thay vì đứng im."
-                    log_event WARN low_server_strict_fallback "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
-                    link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                        log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                        return 1
-                    }
+                    log_msg "${RED}[LOW_SERVER]${NC} Khong tim duoc server it nguoi/API bi rate-limit; strict mode se khong mo matchmaking mac dinh."
+                    log_event WARN low_server_strict_blocked "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                    return 1
                 else
                     log_msg "${YLW}[LOW_SERVER]${NC} Không quét được server ít người hoặc API bận; dùng matchmaking mặc định."
                     link="$(roblox_build_game_uri "$PLACE_ID")" || {
@@ -1525,7 +1579,7 @@ view_clone_detail() {
             fi
             ;;
         2)
-            android_force_stop "$pkg" > /dev/null 2>&1
+            monitor_force_stop_package "$pkg" "operator_stop_account" "manual" > /dev/null 2>&1
             tmux send-keys -t "roblox-multi:${win_name}" "q" 2>/dev/null
             echo -e "${RED}  ✓ Đã dừng acc $pkg${NC}"
             beep_warn
@@ -1717,7 +1771,7 @@ action_stop_all() {
         [ -f "$cfg" ] || continue
         local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
         [ -z "$pkg" ] && continue
-        android_force_stop "$pkg" > /dev/null 2>&1
+        monitor_force_stop_package "$pkg" "operator_stop_all" "manual" > /dev/null 2>&1
         echo -e "${RED}  ✓ Dừng: $pkg${NC}"
     done
 
