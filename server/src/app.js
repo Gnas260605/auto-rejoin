@@ -24,10 +24,31 @@ import { CommerceRepository } from "./repositories/commerce.repository.js";
 import { CommerceService } from "./services/commerce.service.js";
 import { CommerceController } from "./controllers/commerce.controller.js";
 import { createCommerceRouter, createCommerceAdminRouter } from "./routes/commerce.routes.js";
+import { UserRepository } from "./repositories/user.repository.js";
+import { WalletRepository } from "./repositories/wallet.repository.js";
+import { RbacRepository } from "./repositories/rbac.repository.js";
+import { RbacService } from "./services/rbac.service.js";
+import { UserAuthService } from "./services/user-auth.service.js";
+import { WalletService } from "./services/wallet.service.js";
+import { UserAuthController } from "./controllers/user-auth.controller.js";
+import { WalletController } from "./controllers/wallet.controller.js";
+import { createCustomerAuthMiddleware } from "./middleware/customer-auth.middleware.js";
+import { createCustomerRateLimits } from "./middleware/customer-rate-limit.middleware.js";
+import { createUserAuthRouter } from "./routes/user-auth.routes.js";
+import { createWalletRouter } from "./routes/wallet.routes.js";
 import { errorMiddleware, notFoundMiddleware } from "./middleware/error.middleware.js";
 import { isoNow } from "./utils/time.js";
 
-export function createApp({ repository, adminRepository, paymentRepository, commerceRepository, config = env } = {}) {
+export function createApp({
+  repository,
+  adminRepository,
+  paymentRepository,
+  commerceRepository,
+  userRepository,
+  walletRepository,
+  rbacRepository,
+  config = env
+} = {}) {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
@@ -53,11 +74,14 @@ export function createApp({ repository, adminRepository, paymentRepository, comm
     next();
   });
 
-  const pool = (!repository || !adminRepository || !paymentRepository || !commerceRepository) ? getPool() : null;
+  const pool = (!repository || !adminRepository || !paymentRepository || !commerceRepository || !userRepository || !walletRepository || !rbacRepository) ? getPool() : null;
   const licRepo = repository || new LicenseRepository(pool);
   const admRepo = adminRepository || new AdminRepository(pool);
   const payRepo = paymentRepository || new PaymentRepository(pool);
   const comRepo = commerceRepository || new CommerceRepository(pool);
+  const userRepo = userRepository || new UserRepository(pool);
+  const walRepo = walletRepository || new WalletRepository(pool);
+  const rbacRepo = rbacRepository || new RbacRepository(pool);
 
   const licService = new LicenseService({ repository: licRepo, config });
   const licController = new LicenseController(licService);
@@ -84,6 +108,27 @@ export function createApp({ repository, adminRepository, paymentRepository, comm
   });
   const comController = new CommerceController(comService);
 
+  const rbacService = new RbacService({ rbacRepository: rbacRepo });
+  const userAuthService = new UserAuthService({
+    userRepository: userRepo,
+    walletRepository: walRepo,
+    rbacService,
+    config
+  });
+  const userAuthController = new UserAuthController(userAuthService, config);
+
+  const walletService = new WalletService({
+    walletRepository: walRepo,
+    config
+  });
+  const walletController = new WalletController(walletService);
+
+  const customerAuthMiddleware = createCustomerAuthMiddleware({
+    userAuthService,
+    rbacService
+  });
+  const customerRateLimits = createCustomerRateLimits(config);
+
   app.get("/api/v1/health", async (_req, res, next) => {
     try {
       if (!repository) {
@@ -95,6 +140,22 @@ export function createApp({ repository, adminRepository, paymentRepository, comm
     }
   });
 
+  // Customer Authentication & Profile
+  app.use("/api/v1/auth", createUserAuthRouter({
+    controller: userAuthController,
+    authMiddleware: customerAuthMiddleware,
+    rateLimits: customerRateLimits
+  }));
+  app.get("/api/v1/me", customerAuthMiddleware.authenticate, userAuthController.me);
+
+  // Customer Wallet
+  app.use("/api/v1/wallet", createWalletRouter({
+    controller: walletController,
+    authMiddleware: customerAuthMiddleware,
+    rateLimits: customerRateLimits
+  }));
+
+  // Existing Core APIs
   app.use("/api/v1", createLicenseRouter({ controller: licController, rateLimits: licRateLimits }));
   app.use("/api/v1", createPaymentRouter({ controller: payController, rateLimits: licRateLimits }));
   app.use("/api/v1", createCommerceRouter({ controller: comController, rateLimits: licRateLimits }));

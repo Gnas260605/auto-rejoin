@@ -36,8 +36,11 @@ import {
   X,
   Loader2,
   Gift,
-  CheckCheck
+  CheckCheck,
+  User
 } from "lucide-react";
+import { useCustomerAuth } from "../context/CustomerAuthContext.jsx";
+import { CustomerAuthModal } from "../components/CustomerAuthModal.jsx";
 
 // Telco definitions aligned with ShopRoblox
 const TELCO_OPTIONS = [
@@ -90,7 +93,11 @@ const DEFAULT_BANNERS = [
   }
 ];
 
-export function StorefrontPage({ onNavigateToPortal, onNavigateToAdmin }) {
+export function StorefrontPage({ onNavigateToPortal, onNavigateToAdmin, onNavigateToDashboard }) {
+  const { customer, wallet } = useCustomerAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState("login");
+
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -340,17 +347,40 @@ export function StorefrontPage({ onNavigateToPortal, onNavigateToAdmin }) {
             {onNavigateToPortal && (
               <button
                 onClick={onNavigateToPortal}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-300 hover:text-white bg-gray-800/80 hover:bg-gray-700 border border-gray-700/60 rounded-xl transition-all"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-300 hover:text-white bg-gray-800/80 hover:bg-gray-700 border border-gray-700/60 rounded-xl transition-all cursor-pointer"
               >
                 <Key className="w-3.5 h-3.5 text-blue-400" />
                 Tra Cứu Key
               </button>
             )}
 
+            {customer ? (
+              <button
+                onClick={onNavigateToDashboard}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-xl border border-cyan-500/40 bg-[#0c192c] hover:bg-[#12233f] text-cyan-300 transition-all cursor-pointer shadow-md shadow-cyan-950/40"
+                title="Mở Bảng Điều Khiển Khách Hàng & Quản Lý Ví"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>@{customer.username}</span>
+                <span className="text-gray-600">|</span>
+                <span className="text-emerald-400 font-extrabold">
+                  {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(wallet?.balance || 0)}
+                </span>
+              </button>
+            ) : (
+              <button
+                onClick={() => { setAuthModalTab("login"); setAuthModalOpen(true); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-800/60 rounded-xl transition-all cursor-pointer"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Đăng Nhập</span>
+              </button>
+            )}
+
             {onNavigateToAdmin && (
               <button
                 onClick={onNavigateToAdmin}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-lg shadow-blue-600/25 transition-all active:scale-95"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-lg shadow-blue-600/25 transition-all active:scale-95 cursor-pointer"
               >
                 <Server className="w-3.5 h-3.5" />
                 Admin Hub
@@ -1142,6 +1172,16 @@ export function StorefrontPage({ onNavigateToPortal, onNavigateToAdmin }) {
           </div>
         </div>
       )}
+
+      {/* Customer Authentication Modal (Login / Register) */}
+      <CustomerAuthModal
+        isOpen={authModalOpen}
+        initialTab={authModalTab}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={() => {
+          setAuthModalOpen(false);
+        }}
+      />
 
       {/* Global Marquee Styling */}
       <style>{`

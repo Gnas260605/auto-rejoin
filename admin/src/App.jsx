@@ -9,6 +9,7 @@ import { AuditLogsPage } from "./pages/AuditLogsPage.jsx";
 import { PricingSettingsPage } from "./pages/PricingSettingsPage.jsx";
 import { StorefrontPage } from "./pages/StorefrontPage.jsx";
 import { CustomerPortalPage } from "./pages/CustomerPortalPage.jsx";
+import { CustomerDashboardPage } from "./pages/CustomerDashboardPage.jsx";
 import { ApiManagementPage } from "./pages/ApiManagementPage.jsx";
 import { MarketingAdsPage } from "./pages/MarketingAdsPage.jsx";
 import { PayOSManagementPage } from "./pages/PayOSManagementPage.jsx";
@@ -49,8 +50,18 @@ export function App() {
         <StorefrontPage
           onNavigateToPortal={() => setCurrentView("portal")}
           onNavigateToAdmin={() => setCurrentView(admin ? "admin" : "login")}
+          onNavigateToDashboard={() => setCurrentView("customer-dashboard")}
         />
       </>
+    );
+  }
+
+  // View: Customer Dashboard (Wallet & Ledger)
+  if (currentView === "customer-dashboard") {
+    return (
+      <CustomerDashboardPage
+        onBackToStore={() => setCurrentView("storefront")}
+      />
     );
   }
 

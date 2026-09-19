@@ -45,8 +45,11 @@ export function loadEnv() {
   const cookieSameSite = process.env.COOKIE_SAMESITE || process.env.COOKIE_SAME_SITE || "lax";
   const rateLimitEnabled = boolEnv("RATE_LIMIT_ENABLED", true);
 
+  const customerJwtSecret = process.env.CUSTOMER_JWT_SECRET || jwtSecret;
+
   if (nodeEnv === "production") {
     requireProduction(jwtSecret.length >= 32 && !isPlaceholderSecret(jwtSecret), "ADMIN_JWT_SECRET must be at least 32 non-placeholder characters in production");
+    requireProduction(customerJwtSecret.length >= 32 && !isPlaceholderSecret(customerJwtSecret), "CUSTOMER_JWT_SECRET must be at least 32 non-placeholder characters in production");
     requireProduction(licenseKeyPepper.length >= 32 && !isPlaceholderSecret(licenseKeyPepper), "LICENSE_KEY_PEPPER must be at least 32 non-placeholder characters in production");
     requireProduction(!dbName.endsWith("_test"), "DB_NAME must not point to a _test database in production");
     requireProduction(adminOrigins.length > 0 && !adminOrigins.includes("*"), "ADMIN_ORIGIN must be explicit and must not include * in production");
@@ -82,6 +85,13 @@ export function loadEnv() {
       cookieSecure,
       cookieSameSite
     },
+    customer: {
+      jwtSecret: customerJwtSecret,
+      tokenTtlSeconds: intEnv("CUSTOMER_TOKEN_TTL_SECONDS", 900), // 15 mins
+      refreshTokenTtlSeconds: intEnv("CUSTOMER_REFRESH_TOKEN_TTL_SECONDS", 604800), // 7 days
+      cookieSecure,
+      cookieSameSite
+    },
     rateLimit: {
       enabled: rateLimitEnabled,
       windowMs: intEnv("RATE_LIMIT_WINDOW_MS", 900000),
@@ -89,7 +99,11 @@ export function loadEnv() {
       validateMax: intEnv("RATE_LIMIT_VALIDATE_MAX", 120),
       deactivateMax: intEnv("RATE_LIMIT_DEACTIVATE_MAX", 30),
       adminLoginMax: intEnv("RATE_LIMIT_ADMIN_LOGIN_MAX", 10),
-      adminApiMax: intEnv("RATE_LIMIT_ADMIN_API_MAX", 300)
+      adminApiMax: intEnv("RATE_LIMIT_ADMIN_API_MAX", 300),
+      customerRegisterMax: intEnv("RATE_LIMIT_CUSTOMER_REGISTER_MAX", 10),
+      customerLoginMax: intEnv("RATE_LIMIT_CUSTOMER_LOGIN_MAX", 15),
+      customerRefreshMax: intEnv("RATE_LIMIT_CUSTOMER_REFRESH_MAX", 30),
+      walletMax: intEnv("RATE_LIMIT_WALLET_MAX", 120)
     }
   };
 }
