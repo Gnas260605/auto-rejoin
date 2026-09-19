@@ -1,0 +1,10 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+  Display #0 (activities from top to bottom):
+  Stack #0: type=home mode=fullscreen
+    Task id #1
+      TaskRecord{1122334 #1 A=com.android.launcher3 U=0 StackId=0 sz=1}
+        Run #0: ActivityRecord{7788990 u0 com.android.launcher3/.uioverrides.QuickstepLauncher t1}
+  Stack #1: type=standard mode=freeform
+    Task id #45
+      TaskRecord{5b6c7d8 #45 A=com.roblox.client U=0 StackId=1 sz=1}
+        Run #0: ActivityRecord{5b6c7d8 u0 com.roblox.client/com.roblox.client.ActivityProtocolLaunch t45}

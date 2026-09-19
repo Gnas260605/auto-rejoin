@@ -1,0 +1,24 @@
+{
+  "previousPageCursor": "cursor_page_1_xyz789",
+  "nextPageCursor": null,
+  "data": [
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "maxPlayers": 12,
+      "playing": 3,
+      "playerTokens": [],
+      "players": [],
+      "fps": 58.0,
+      "ping": 75
+    },
+    {
+      "id": "55555555-5555-5555-5555-555555555555",
+      "maxPlayers": 12,
+      "playing": 1,
+      "playerTokens": [],
+      "players": [],
+      "fps": 60.0,
+      "ping": 40
+    }
+  ]
+}

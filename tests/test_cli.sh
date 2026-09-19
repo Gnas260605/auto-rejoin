@@ -130,6 +130,18 @@ features_command() {
     assert_contains "features disabled captcha" "reCAPTCHA solving/bypass automation" "${TEST_TMP}/out"
 }
 
+api_command() {
+    assert_status "api help" 0 "$CLI" api help
+    assert_contains "api help universe" "universe <PLACE_ID>" "${TEST_TMP}/out"
+    assert_contains "api help pick-server" "pick-server <PLACE_ID>" "${TEST_TMP}/out"
+
+    assert_status "api breaker-status" 0 "$CLI" api breaker-status
+    assert_contains "api breaker healthy" "is CLOSED (healthy)" "${TEST_TMP}/out"
+
+    assert_status "api breaker-reset" 0 "$CLI" api breaker-reset
+    assert_contains "api breaker reset" "circuit breaker reset" "${TEST_TMP}/out"
+}
+
 outside_cwd() {
     (
         cd "$TEST_TMP" || exit 2
@@ -159,6 +171,7 @@ update_help_command
 support_bundle_command
 features_command
 self_test_command
+api_command
 outside_cwd
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"

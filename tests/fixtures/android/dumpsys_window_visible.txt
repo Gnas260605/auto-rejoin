@@ -1,0 +1,17 @@
+# Dumpsys Window with visible surface for com.roblox.client
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #4 Window{3a5b6c8 u0 com.roblox.client/com.roblox.client.ActivityProtocolLaunch}:
+    mDisplayId=0 stackId=1 mSession=Session{7f1a2b3 1234:u0a10050} mClient=android.os.BinderProxy@8c9d0e1
+    mOwnerUid=10050 mShowToOwnerOnly=true package=com.roblox.client appOp=SYSTEM_ALERT_WINDOW
+    mAttrs=WM.LayoutParams{(0,0)(fillxfill) sim=#20 ty=1 fl=#81810100 pfl=0x20000 fmt=-3 wanim=0x10302fe surfaceInsets=Rect(0, 0 - 0, 0)}
+    Requested w=1080 h=2400 mLayoutSeq=120
+    mHasSurface=true isReadyForDisplay()=true mWindowRemovalAllowed=false
+    mViewVisibility=0x0 mPolicyVisibility=true mPolicyVisibilityAfterAnim=true
+    mAttachInfo:
+      mViewVisibility=0x0
+    WindowStateAnimator{e1f2a3b com.roblox.client/com.roblox.client.ActivityProtocolLaunch}:
+      mSurface=Surface(name=com.roblox.client/com.roblox.client.ActivityProtocolLaunch)/@0x7a8b9c
+      mDrawState=HAS_DRAWN
+      mLastHidden=false
+  mCurrentFocus=Window{3a5b6c8 u0 com.roblox.client/com.roblox.client.ActivityProtocolLaunch}
+  mFocusedApp=AppWindowToken{4d5e6f7 token=Token{1a2b3c4 ActivityRecord{5b6c7d8 u0 com.roblox.client/com.roblox.client.ActivityProtocolLaunch t45}}}

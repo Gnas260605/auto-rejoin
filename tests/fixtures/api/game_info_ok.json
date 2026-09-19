@@ -1,0 +1,32 @@
+{
+  "data": [
+    {
+      "id": 1234567890,
+      "rootPlaceId": 97598239454123,
+      "name": "Blox Fruits",
+      "description": "Welcome to Blox Fruits!",
+      "creator": {
+        "id": 1,
+        "name": "Gamer Robot Inc",
+        "type": "Group"
+      },
+      "price": null,
+      "allowedGearGenres": [],
+      "allowedGearCategories": [],
+      "isGenreEnforced": false,
+      "copyingAllowed": false,
+      "playing": 543210,
+      "visits": 35000000000,
+      "maxPlayers": 12,
+      "created": "2019-01-16T00:00:00Z",
+      "updated": "2026-09-18T00:00:00Z",
+      "studioAccessToApisAllowed": false,
+      "createVipServersAllowed": true,
+      "universeAvatarType": "MorphToR6",
+      "genre": "All",
+      "isAllAges": true,
+      "isFavoritedByUser": false,
+      "favoritedCount": 15000000
+    }
+  ]
+}

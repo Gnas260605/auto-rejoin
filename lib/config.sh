@@ -45,11 +45,26 @@ config_init_defaults() {
     WINDOW_REOPEN_ENABLED="${WINDOW_REOPEN_ENABLED:-true}"
     LOBBY_RETRY_LIMIT="${LOBBY_RETRY_LIMIT:-3}"
     LOBBY_RETRY_DELAY="${LOBBY_RETRY_DELAY:-3}"
+    ROBLOX_API_ENABLED="${ROBLOX_API_ENABLED:-true}"
+    ROBLOX_API_CONNECT_TIMEOUT="${ROBLOX_API_CONNECT_TIMEOUT:-5}"
+    ROBLOX_API_MAX_TIME="${ROBLOX_API_MAX_TIME:-10}"
+    ROBLOX_API_CACHE_ENABLED="${ROBLOX_API_CACHE_ENABLED:-true}"
+    ROBLOX_API_BREAKER_LIMIT="${ROBLOX_API_BREAKER_LIMIT:-5}"
+    ROBLOX_API_BREAKER_COOLDOWN="${ROBLOX_API_BREAKER_COOLDOWN:-60}"
+    ROBLOX_USER_ID="${ROBLOX_USER_ID:-}"
+    PRESENCE_ENABLED="${PRESENCE_ENABLED:-false}"
+    PRESENCE_INTERVAL="${PRESENCE_INTERVAL:-60}"
+    AUTO_DISCOVER_UNIVERSE="${AUTO_DISCOVER_UNIVERSE:-true}"
+    EXPECTED_UNIVERSE_ID="${EXPECTED_UNIVERSE_ID:-}"
+    ALLOWED_GAME_PLACE_IDS="${ALLOWED_GAME_PLACE_IDS:-}"
+    TRANSIT_TIMEOUT="${TRANSIT_TIMEOUT:-45}"
+    LOW_SERVER_MAX_PAGES="${LOW_SERVER_MAX_PAGES:-5}"
+    FAILED_JOB_TTL="${FAILED_JOB_TTL:-300}"
 }
 
 config_is_allowed_key() {
     case "$1" in
-        PLACE_ID|PRIVATE_CODE|ROBLOX_PACKAGE|CHECK_INTERVAL|AUTO_RESTART_PERIOD|ANTI_AFK|AFK_TAP_INTERVAL|TAP_X|TAP_Y|DISCORD_WEBHOOK|ROBLOX_USERNAME|PROFILE|FREEFORM_LAYOUT|FREEFORM_WIDTH|FREEFORM_HEIGHT|FREEFORM_OFFSET_X|FREEFORM_OFFSET_Y|LICENSE_MODE|LICENSE_API|JOIN_LOW_SERVER|LOW_SERVER_MIN_PLAYERS|LOW_SERVER_MAX_PLAYERS|LOW_SERVER_STRICT|ALLOW_UNSCOPED_DEEPLINK|ALLOW_HOME_FALLBACK|WINDOW_MISSING_THRESHOLD|WINDOW_REOPEN_ENABLED|LOBBY_RETRY_LIMIT|LOBBY_RETRY_DELAY)
+        PLACE_ID|PRIVATE_CODE|ROBLOX_PACKAGE|CHECK_INTERVAL|AUTO_RESTART_PERIOD|ANTI_AFK|AFK_TAP_INTERVAL|TAP_X|TAP_Y|DISCORD_WEBHOOK|ROBLOX_USERNAME|PROFILE|FREEFORM_LAYOUT|FREEFORM_WIDTH|FREEFORM_HEIGHT|FREEFORM_OFFSET_X|FREEFORM_OFFSET_Y|LICENSE_MODE|LICENSE_API|JOIN_LOW_SERVER|LOW_SERVER_MIN_PLAYERS|LOW_SERVER_MAX_PLAYERS|LOW_SERVER_STRICT|ALLOW_UNSCOPED_DEEPLINK|ALLOW_HOME_FALLBACK|WINDOW_MISSING_THRESHOLD|WINDOW_REOPEN_ENABLED|LOBBY_RETRY_LIMIT|LOBBY_RETRY_DELAY|ROBLOX_API_ENABLED|ROBLOX_API_CONNECT_TIMEOUT|ROBLOX_API_MAX_TIME|ROBLOX_API_CACHE_ENABLED|ROBLOX_API_BREAKER_LIMIT|ROBLOX_API_BREAKER_COOLDOWN|ROBLOX_USER_ID|PRESENCE_ENABLED|PRESENCE_INTERVAL|AUTO_DISCOVER_UNIVERSE|EXPECTED_UNIVERSE_ID|ALLOWED_GAME_PLACE_IDS|TRANSIT_TIMEOUT|LOW_SERVER_MAX_PAGES|FAILED_JOB_TTL)
             return 0
             ;;
         *)
@@ -151,6 +166,29 @@ config_validate_uint() {
     return 0
 }
 
+config_validate_optional_uint() {
+    local key="$1"
+    local default="$2"
+    local min="$3"
+    local max="$4"
+    local value="${!key}"
+
+    if [ -z "$value" ]; then
+        return 0
+    fi
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        config_warn "Invalid numeric value for $key; using default"
+        config_set_value "$key" "$default"
+        return 1
+    fi
+    if [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+        config_warn "Out-of-range value for $key; using default"
+        config_set_value "$key" "$default"
+        return 1
+    fi
+    return 0
+}
+
 config_validate_auto_or_uint() {
     local key="$1"
     local default="$2"
@@ -235,6 +273,20 @@ config_validate() {
     config_normalize_bool WINDOW_REOPEN_ENABLED || { WINDOW_REOPEN_ENABLED="true"; status=1; }
     config_validate_uint LOBBY_RETRY_LIMIT 3 1 100 || status=1
     config_validate_uint LOBBY_RETRY_DELAY 3 1 3600 || status=1
+    config_normalize_bool ROBLOX_API_ENABLED || { ROBLOX_API_ENABLED="true"; status=1; }
+    config_validate_uint ROBLOX_API_CONNECT_TIMEOUT 5 1 60 || status=1
+    config_validate_uint ROBLOX_API_MAX_TIME 10 1 120 || status=1
+    config_normalize_bool ROBLOX_API_CACHE_ENABLED || { ROBLOX_API_CACHE_ENABLED="true"; status=1; }
+    config_validate_uint ROBLOX_API_BREAKER_LIMIT 5 1 50 || status=1
+    config_validate_uint ROBLOX_API_BREAKER_COOLDOWN 60 5 3600 || status=1
+    config_validate_optional_uint ROBLOX_USER_ID "" 1 999999999999999999 || status=1
+    config_normalize_bool PRESENCE_ENABLED || { PRESENCE_ENABLED="false"; status=1; }
+    config_validate_uint PRESENCE_INTERVAL 60 10 86400 || status=1
+    config_normalize_bool AUTO_DISCOVER_UNIVERSE || { AUTO_DISCOVER_UNIVERSE="true"; status=1; }
+    config_validate_optional_uint EXPECTED_UNIVERSE_ID "" 1 999999999999999999 || status=1
+    config_validate_uint TRANSIT_TIMEOUT 45 5 600 || status=1
+    config_validate_uint LOW_SERVER_MAX_PAGES 5 1 20 || status=1
+    config_validate_uint FAILED_JOB_TTL 300 10 86400 || status=1
 
     return "$status"
 }
@@ -327,6 +379,21 @@ config_save() {
         config_write_raw WINDOW_REOPEN_ENABLED
         config_write_raw LOBBY_RETRY_LIMIT
         config_write_raw LOBBY_RETRY_DELAY
+        config_write_raw ROBLOX_API_ENABLED
+        config_write_raw ROBLOX_API_CONNECT_TIMEOUT
+        config_write_raw ROBLOX_API_MAX_TIME
+        config_write_raw ROBLOX_API_CACHE_ENABLED
+        config_write_raw ROBLOX_API_BREAKER_LIMIT
+        config_write_raw ROBLOX_API_BREAKER_COOLDOWN
+        config_write_quoted ROBLOX_USER_ID
+        config_write_raw PRESENCE_ENABLED
+        config_write_raw PRESENCE_INTERVAL
+        config_write_raw AUTO_DISCOVER_UNIVERSE
+        config_write_quoted EXPECTED_UNIVERSE_ID
+        config_write_quoted ALLOWED_GAME_PLACE_IDS
+        config_write_raw TRANSIT_TIMEOUT
+        config_write_raw LOW_SERVER_MAX_PAGES
+        config_write_raw FAILED_JOB_TTL
     } > "$tmp" || {
         rm -f "$tmp"
         return 1

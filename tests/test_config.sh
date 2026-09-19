@@ -26,6 +26,10 @@ reset_config_vars() {
     unset JOIN_LOW_SERVER LOW_SERVER_MIN_PLAYERS LOW_SERVER_MAX_PLAYERS LOW_SERVER_STRICT
     unset ALLOW_UNSCOPED_DEEPLINK ALLOW_HOME_FALLBACK
     unset WINDOW_MISSING_THRESHOLD WINDOW_REOPEN_ENABLED LOBBY_RETRY_LIMIT LOBBY_RETRY_DELAY
+    unset ROBLOX_API_ENABLED ROBLOX_API_CONNECT_TIMEOUT ROBLOX_API_MAX_TIME ROBLOX_API_CACHE_ENABLED
+    unset ROBLOX_API_BREAKER_LIMIT ROBLOX_API_BREAKER_COOLDOWN ROBLOX_USER_ID
+    unset PRESENCE_ENABLED PRESENCE_INTERVAL AUTO_DISCOVER_UNIVERSE EXPECTED_UNIVERSE_ID
+    unset ALLOWED_GAME_PLACE_IDS TRANSIT_TIMEOUT LOW_SERVER_MAX_PAGES FAILED_JOB_TTL
     CONFIG_WARNINGS=""
 }
 
@@ -225,6 +229,18 @@ missing_config_uses_defaults() {
     assert_eq "default window reopen" "true" "$WINDOW_REOPEN_ENABLED"
     assert_eq "default lobby retry limit" "3" "$LOBBY_RETRY_LIMIT"
     assert_eq "default lobby retry delay" "3" "$LOBBY_RETRY_DELAY"
+    assert_eq "default api enabled" "true" "$ROBLOX_API_ENABLED"
+    assert_eq "default api timeout" "5" "$ROBLOX_API_CONNECT_TIMEOUT"
+    assert_eq "default api max time" "10" "$ROBLOX_API_MAX_TIME"
+    assert_eq "default api cache enabled" "true" "$ROBLOX_API_CACHE_ENABLED"
+    assert_eq "default api breaker limit" "5" "$ROBLOX_API_BREAKER_LIMIT"
+    assert_eq "default api breaker cooldown" "60" "$ROBLOX_API_BREAKER_COOLDOWN"
+    assert_eq "default presence enabled" "false" "$PRESENCE_ENABLED"
+    assert_eq "default presence interval" "60" "$PRESENCE_INTERVAL"
+    assert_eq "default auto discover universe" "true" "$AUTO_DISCOVER_UNIVERSE"
+    assert_eq "default transit timeout" "45" "$TRANSIT_TIMEOUT"
+    assert_eq "default low server max pages" "5" "$LOW_SERVER_MAX_PAGES"
+    assert_eq "default failed job ttl" "300" "$FAILED_JOB_TTL"
 }
 
 save_and_reload() {
@@ -237,6 +253,15 @@ save_and_reload() {
     ROBLOX_USERNAME=Acc02
     LOW_SERVER_STRICT=true
     ALLOW_UNSCOPED_DEEPLINK=true
+    ROBLOX_API_ENABLED=true
+    ROBLOX_USER_ID=123456789
+    PRESENCE_ENABLED=true
+    PRESENCE_INTERVAL=30
+    EXPECTED_UNIVERSE_ID=987654321
+    ALLOWED_GAME_PLACE_IDS="97598239454123,2753915549"
+    TRANSIT_TIMEOUT=60
+    LOW_SERVER_MAX_PAGES=8
+    FAILED_JOB_TTL=600
     config_save "$cfg"
     assert_status "save config status" 0 "$?"
 
@@ -246,6 +271,30 @@ save_and_reload() {
     assert_eq "reload saved username" "Acc02" "$ROBLOX_USERNAME"
     assert_eq "reload saved low strict" "true" "$LOW_SERVER_STRICT"
     assert_eq "reload saved unscoped fallback" "true" "$ALLOW_UNSCOPED_DEEPLINK"
+    assert_eq "reload saved user id" "123456789" "$ROBLOX_USER_ID"
+    assert_eq "reload saved presence enabled" "true" "$PRESENCE_ENABLED"
+    assert_eq "reload saved presence interval" "30" "$PRESENCE_INTERVAL"
+    assert_eq "reload saved expected universe" "987654321" "$EXPECTED_UNIVERSE_ID"
+    assert_eq "reload saved allowed place ids" "97598239454123,2753915549" "$ALLOWED_GAME_PLACE_IDS"
+    assert_eq "reload saved transit timeout" "60" "$TRANSIT_TIMEOUT"
+    assert_eq "reload saved max pages" "8" "$LOW_SERVER_MAX_PAGES"
+    assert_eq "reload saved failed job ttl" "600" "$FAILED_JOB_TTL"
+}
+
+api_config_validation() {
+    local cfg="${TEST_TMP}/bad-api.cfg"
+    write_config "$cfg" \
+        'ROBLOX_API_CONNECT_TIMEOUT=9999' \
+        'ROBLOX_API_BREAKER_LIMIT=0' \
+        'PRESENCE_INTERVAL=5' \
+        'ROBLOX_USER_ID=notanumber'
+
+    run_load "$cfg"
+    assert_status "api validation failure status" 1 "$?"
+    assert_eq "out of range api timeout resets" "5" "$ROBLOX_API_CONNECT_TIMEOUT"
+    assert_eq "out of range breaker limit resets" "5" "$ROBLOX_API_BREAKER_LIMIT"
+    assert_eq "out of range presence interval resets" "60" "$PRESENCE_INTERVAL"
+    assert_eq "invalid user id resets" "" "$ROBLOX_USER_ID"
 }
 
 migration_idempotency() {
@@ -283,6 +332,7 @@ invalid_license_mode_fails_validation
 valid_clone_package
 missing_config_uses_defaults
 save_and_reload
+api_config_validation
 migration_idempotency
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"

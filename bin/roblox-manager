@@ -25,8 +25,11 @@ ENTITLEMENT_LIB="${PROJECT_DIR}/lib/entitlement.sh"
 UPDATER_LIB="${PROJECT_DIR}/lib/updater.sh"
 COOKIE_LIB="${PROJECT_DIR}/lib/cookie.sh"
 DELTA_LIB="${PROJECT_DIR}/lib/delta.sh"
+ROBLOX_API_LIB="${PROJECT_DIR}/lib/roblox_api.sh"
+ROBLOX_SESSION_LIB="${PROJECT_DIR}/lib/roblox_session.sh"
+SESSION_EVIDENCE_LIB="${PROJECT_DIR}/lib/session_evidence.sh"
 
-for manager_lib in "$CONFIG_LIB" "$ANDROID_LIB" "$NETWORK_LIB" "$DOCTOR_LIB" "$UI_LIB" "$PROFILE_LIB" "$INSTALLER_LIB" "$LICENSE_LIB" "$ENTITLEMENT_LIB" "$UPDATER_LIB" "$COOKIE_LIB" "$DELTA_LIB"; do
+for manager_lib in "$CONFIG_LIB" "$ANDROID_LIB" "$NETWORK_LIB" "$DOCTOR_LIB" "$UI_LIB" "$PROFILE_LIB" "$INSTALLER_LIB" "$LICENSE_LIB" "$ENTITLEMENT_LIB" "$UPDATER_LIB" "$COOKIE_LIB" "$DELTA_LIB" "$ROBLOX_API_LIB" "$ROBLOX_SESSION_LIB" "$SESSION_EVIDENCE_LIB"; do
     if [ ! -f "$manager_lib" ]; then
         echo "Error: missing manager library: $manager_lib" >&2
         exit 2
@@ -86,6 +89,7 @@ Commands:
   update      Check for, inspect, or install a signed release update.
   support-bundle
               Generate a sanitized diagnostics tarball for troubleshooting.
+  api         Query public Roblox APIs (place universe, servers, user, presence).
   self-test   Run local syntax/module checks without Android, network, or license.
   status      Delegate to compatibility menu/status entrypoint.
   start       Delegate to compatibility setup/start flow.
@@ -666,6 +670,112 @@ Feature status:
 Use official Roblox/Delta login and key flows for account-sensitive operations.
 EOF
 }
+manager_api() {
+    local action="${1:-help}"
+    [ "$#" -gt 0 ] && shift
+
+    case "$action" in
+        universe)
+            local place_id="${1:-}"
+            [ -n "$place_id" ] || { echo "Usage: roblox-manager api universe <PLACE_ID>" >&2; return 2; }
+            roblox_api_place_to_universe "$place_id"
+            ;;
+        game)
+            local universe_id="${1:-}"
+            [ -n "$universe_id" ] || { echo "Usage: roblox-manager api game <UNIVERSE_ID>" >&2; return 2; }
+            roblox_api_get_game "$universe_id"
+            ;;
+        servers)
+            local place_id="${1:-}"
+            [ -n "$place_id" ] || { echo "Usage: roblox-manager api servers <PLACE_ID> [CURSOR] [LIMIT]" >&2; return 2; }
+            local cursor="${2:-}" limit="${3:-100}"
+            roblox_api_get_public_servers "$place_id" "$cursor" "$limit"
+            ;;
+        pick-server)
+            local place_id="${1:-}"
+            [ -n "$place_id" ] || { echo "Usage: roblox-manager api pick-server <PLACE_ID> [SLOT] [MIN] [MAX] [FAILED_JOBS]" >&2; return 2; }
+            local slot="${2:-0}" min="${3:-1}" max="${4:-0}" failed="${5:-}"
+            roblox_api_pick_server "$place_id" "$slot" "$min" "$max" "$failed"
+            ;;
+        user)
+            local username="${1:-}"
+            [ -n "$username" ] || { echo "Usage: roblox-manager api user <USERNAME>" >&2; return 2; }
+            roblox_api_resolve_username "$username"
+            ;;
+        presence)
+            local user_id="${1:-}"
+            [ -n "$user_id" ] || { echo "Usage: roblox-manager api presence <USER_ID>" >&2; return 2; }
+            roblox_api_get_presence "$user_id"
+            ;;
+        breaker-status)
+            local provider="${1:-default}"
+            local bfile
+            bfile="$(roblox_api_breaker_file "$provider")"
+            if [ -f "$bfile" ]; then
+                echo "Breaker [$provider] file: $bfile"
+                cat "$bfile"
+            else
+                echo "Breaker [$provider] is CLOSED (healthy)."
+            fi
+            ;;
+        breaker-reset)
+            local provider="${1:-}"
+            roblox_api_reset_breaker "$provider"
+            echo "Roblox API circuit breaker reset."
+            ;;
+        doctor)
+            echo "Checking Roblox public API availability..."
+            for prov in universes games servers users presence; do
+                if roblox_api_is_available "$prov"; then
+                    echo "  [OK] $prov.roblox.com"
+                else
+                    echo "  [DEGRADED/TRIPPED] $prov.roblox.com"
+                fi
+            done
+            ;;
+        help|--help|-h)
+            cat <<'EOF'
+Usage: roblox-manager api <action> [args...]
+
+Actions:
+  doctor                            Check API health & breaker status
+  universe <PLACE_ID>               Resolve Place ID to Universe ID
+  game <UNIVERSE_ID>                Fetch Game Metadata JSON
+  servers <PLACE_ID> [CURSOR] [LIM] List public servers JSON
+  pick-server <PLACE_ID> [SLOT] [MIN] [MAX] [FAILED] Pick optimal low server
+  user <USERNAME>                   Resolve Username to User ID
+  presence <USER_ID>                Get user presence (type|place|game|universe|loc)
+  breaker-status [PROVIDER]         Inspect circuit breaker status
+  breaker-reset [PROVIDER]          Reset tripped circuit breaker
+EOF
+            ;;
+        *)
+            echo "Error: unknown api action: $action" >&2
+            echo "Run 'roblox-manager api help' for usage." >&2
+            return 2
+            ;;
+    esac
+}
+
+manager_session_debug() {
+    local package="${1:-com.roblox.client}"
+    local expected_place="${PLACE_ID:-}"
+    local expected_universe="${EXPECTED_UNIVERSE_ID:-}"
+
+    echo "=== Session Debug Diagnostics for [$package] ==="
+    local ev
+    ev="$(session_collect_evidence "$package" "$expected_place" "$expected_universe")"
+    echo "$ev"
+    echo ""
+    local classification
+    classification="$(session_classify "$ev")"
+    local state confidence
+    state="$(echo "$classification" | cut -d'|' -f1)"
+    confidence="$(echo "$classification" | cut -d'|' -f2)"
+    echo "Classified State: $state"
+    echo "Confidence Score: $confidence%"
+}
+
 manager_status() {
     cd "$PROJECT_DIR" || return 2
     bash "$PROJECT_DIR/auto_rejoin.sh"
@@ -727,6 +837,12 @@ case "$command_name" in
         ;;
     support-bundle)
         manager_support_bundle "$@"
+        ;;
+    api)
+        manager_api "$@"
+        ;;
+    session-debug)
+        manager_session_debug "$@"
         ;;
     self-test)
         manager_self_test "$@"

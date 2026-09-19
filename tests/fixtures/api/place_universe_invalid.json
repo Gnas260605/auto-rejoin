@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "code": 1,
+      "message": "Place not found"
+    }
+  ]
+}

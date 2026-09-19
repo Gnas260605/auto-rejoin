@@ -1,0 +1,13 @@
+# Dumpsys Window where com.roblox.client Freeform window was closed with 'X' button
+# Process is alive and launcher task is focused, but Roblox window surface is destroyed or gone.
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #1 Window{1122334 u0 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}:
+    mDisplayId=0 stackId=0 mSession=Session{9988776 567:u0a10015} mClient=android.os.BinderProxy@1234567
+    mOwnerUid=10015 mShowToOwnerOnly=true package=com.android.launcher3
+    Requested w=1080 h=2400 mLayoutSeq=150
+    mHasSurface=true isReadyForDisplay()=true
+    mViewVisibility=0x0 mPolicyVisibility=true
+    WindowStateAnimator{2233445 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}:
+      mSurface=Surface(name=com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher)/@0x112233
+  mCurrentFocus=Window{1122334 u0 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}
+  mFocusedApp=AppWindowToken{3344556 token=Token{5566778 ActivityRecord{7788990 u0 com.android.launcher3/.uioverrides.QuickstepLauncher t1}}}

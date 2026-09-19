@@ -186,6 +186,52 @@ android_is_task_present() {
     return 1
 }
 
+android_has_window_record() {
+    local package="$1"
+    android_validate_package "$package" || return 2
+
+    local win_out
+    win_out="$(android_dumpsys window windows 2>/dev/null)"
+    if [ -n "$win_out" ]; then
+        if echo "$win_out" | grep -E -q "Window\{.*${package}"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+android_is_window_surface_visible() {
+    local package="$1"
+    android_validate_package "$package" || return 2
+
+    local win_out
+    win_out="$(android_dumpsys window windows 2>/dev/null)"
+    if [ -n "$win_out" ]; then
+        if echo "$win_out" | grep -E -q "WindowStateAnimator\{.*${package}|mSurface=Surface\(name=.*${package}|(Window\{.*${package}.*(mHasSurface=true|mViewVisibility=0x0))"; then
+            return 0
+        fi
+        # If window is directly focused, surface is visible
+        if echo "$win_out" | grep -E -q "mCurrentFocus=Window\{.*${package}|mFocusedApp=.*${package}"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+android_is_window_focused() {
+    local package="$1"
+    android_validate_package "$package" || return 2
+
+    local win_out
+    win_out="$(android_dumpsys window windows 2>/dev/null)"
+    if [ -n "$win_out" ]; then
+        if echo "$win_out" | grep -E -q "mCurrentFocus=Window\{.*${package}|mFocusedApp=.*${package}"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 android_is_window_visible() {
     local package="$1"
     android_validate_package "$package" || return 2
@@ -202,7 +248,8 @@ android_is_window_visible() {
     local act_out
     act_out="$(android_dumpsys activity top 2>/dev/null)"
     if [ -n "$act_out" ]; then
-        if echo "$act_out" | grep -E -q "ActivityRecord\{.*${package}|mResumedActivity:.*${package}|mResumed=true.*${package}|Task\{.*${package}"; then
+        # Strictly check ActivityRecord or mResumedActivity without matching Task{...package}
+        if echo "$act_out" | grep -E -q "ActivityRecord\{.*${package}|mResumedActivity:.*${package}|mResumed=true.*${package}|ACTIVITY ${package}/"; then
             return 0
         fi
         return 1

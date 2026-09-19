@@ -631,13 +631,8 @@ check_roblox_window_visible() {
         fi
     fi
 
-    # 2. Check window visible qua dumpsys
+    # 2. Check window visible qua dumpsys (surface visible / window focused / top activity)
     if android_is_window_visible "$pkg" 2>/dev/null; then
-        return 0
-    fi
-
-    # 3. Fallback check task stack
-    if check_roblox_task_present 2>/dev/null; then
         return 0
     fi
 

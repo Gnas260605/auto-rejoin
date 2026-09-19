@@ -124,6 +124,12 @@ roblox_fetch_public_servers() {
     local place_id="$1"
     local limit="${2:-100}"
     roblox_validate_place_id "$place_id" || return 1
+
+    if declare -F roblox_api_get_public_servers >/dev/null 2>&1; then
+        roblox_api_get_public_servers "$place_id" "" "$limit"
+        return $?
+    fi
+
     local url="https://games.roblox.com/v1/games/${place_id}/servers/Public?sortOrder=Asc&limit=${limit}&excludeFullGames=true"
     if command -v curl >/dev/null 2>&1; then
         curl -sSL --connect-timeout 6 --max-time 12 "$url" 2>/dev/null
@@ -137,6 +143,14 @@ roblox_pick_low_server() {
     local slot_index="${2:-0}"
     local min_players="${3:-1}"
     local max_players="${4:-0}"
+    local failed_jobs="${5:-}"
+
+    if declare -F roblox_api_pick_server >/dev/null 2>&1; then
+        local picked
+        picked="$(roblox_api_pick_server "$place_id" "$slot_index" "$min_players" "$max_players" "$failed_jobs")" || return 1
+        printf '%s\n' "$picked"
+        return 0
+    fi
 
     local json_out
     json_out="$(roblox_fetch_public_servers "$place_id" 100)" || return 1
@@ -386,3 +400,82 @@ roblox_print_parse_env() {
     printf 'PRIVATE_CODE=%s\n' "$ROBLOX_PARSED_PRIVATE_CODE"
     printf 'URI=%s\n' "$ROBLOX_PARSED_URI"
 }
+
+roblox_launch_verified() {
+    local package="$1"
+    local uri="$2"
+    local bounds="${3:-}"
+    local freeform="${4:-false}"
+    local expected_place="${5:-}"
+    local timeout_process="${LAUNCH_PROCESS_TIMEOUT:-10}"
+    local timeout_task="${LAUNCH_TASK_TIMEOUT:-10}"
+    local timeout_window="${LAUNCH_WINDOW_TIMEOUT:-15}"
+
+    # Initialize new session if session module available
+    if type session_begin >/dev/null 2>&1; then
+        session_begin "$package" "$expected_place" >/dev/null 2>&1 || true
+    fi
+
+    # 1. SEND_INTENT
+    local start_rc=0
+    if [ "$freeform" = "true" ] && [ -n "$bounds" ] && type android_start_uri_with_bounds >/dev/null 2>&1; then
+        android_start_uri_with_bounds "$package" "$uri" "$bounds" >/dev/null 2>&1 || start_rc=$?
+    else
+        android_start_uri_fresh "$package" "$uri" >/dev/null 2>&1 || start_rc=$?
+    fi
+
+    if [ "$start_rc" -ne 0 ]; then
+        return 1 # launch_intent_failed
+    fi
+
+    # 2. WAIT_PROCESS
+    local waited=0
+    local process_found=false
+    while [ "$waited" -lt "$timeout_process" ]; do
+        if android_is_process_running "$package" 2>/dev/null; then
+            process_found=true
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if [ "$process_found" != "true" ]; then
+        return 2 # launch_no_process
+    fi
+
+    # 3. WAIT_TASK
+    waited=0
+    local task_found=false
+    while [ "$waited" -lt "$timeout_task" ]; do
+        if android_is_task_present "$package" 2>/dev/null; then
+            task_found=true
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if [ "$task_found" != "true" ]; then
+        return 3 # launch_no_task
+    fi
+
+    # 4. WAIT_WINDOW
+    waited=0
+    local window_found=false
+    while [ "$waited" -lt "$timeout_window" ]; do
+        if android_is_window_visible "$package" 2>/dev/null; then
+            window_found=true
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if [ "$window_found" != "true" ]; then
+        return 4 # launch_no_window
+    fi
+
+    return 0 # launch_ok
+}
+

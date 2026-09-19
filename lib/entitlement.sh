@@ -159,6 +159,12 @@ entitlement_get_max_instances() {
     local mode max
     mode="$(entitlement_mode)"
     [ "$mode" = "disabled" ] && { printf '999999\n'; return 0; }
+    if [ "$mode" = "optional" ]; then
+        if ! license_load_cache >/dev/null 2>&1 || [ "${LICENSE_STATUS:-}" != "VALID" ]; then
+            printf '999999\n'
+            return 0
+        fi
+    fi
     max="$(license_get_max_instances 2>/dev/null || printf '1')"
     [[ "$max" =~ ^[0-9]+$ ]] || max=1
     [ "$max" -ge 1 ] || max=1

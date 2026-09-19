@@ -1,0 +1,6 @@
+ACTIVITY MANAGER TOP ACTIVITY (dumpsys activity top)
+  ACTIVITY com.roblox.client/com.roblox.client.ActivityProtocolLaunch 3a5b6c8 pid=1234
+    Local Activity 7f1a2b3 State:
+      mResumed=true mStopped=false mFinished=false
+    TaskRecord{5b6c7d8 #45 A=com.roblox.client U=0 StackId=1 sz=1}
+      Run #0: ActivityRecord{5b6c7d8 u0 com.roblox.client/com.roblox.client.ActivityProtocolLaunch t45}

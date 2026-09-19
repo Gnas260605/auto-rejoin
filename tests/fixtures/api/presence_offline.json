@@ -1,0 +1,14 @@
+{
+  "userPresences": [
+    {
+      "userPresenceType": 0,
+      "lastLocation": "",
+      "placeId": null,
+      "rootPlaceId": null,
+      "gameId": null,
+      "universeId": null,
+      "userId": 1122334455,
+      "lastOnline": "2026-09-17T12:00:00Z"
+    }
+  ]
+}
