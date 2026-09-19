@@ -218,14 +218,22 @@ if [ -n "$SETUP_LICENSE_KEY" ]; then
     export LICENSE_MODE LICENSE_API AUTO_REJOIN_LICENSE_MODE AUTO_REJOIN_LICENSE_API
     if [ -z "$LICENSE_API" ]; then
         echo -e "  ${RED}x AUTO_REJOIN_LICENSE_API/LICENSE_API is required when LICENSE_KEY is provided${NC}"
-        exit 1
+        if [ "$AUTO_REJOIN_LICENSE_MODE" = "required" ]; then
+            exit 1
+        fi
+    else
+        echo -e "  ${CYN}[LICENSE]${NC} Activating license key..."
+        if ! license_activate "$SETUP_LICENSE_KEY" "$SCRIPT_DIR"; then
+            if [ "$AUTO_REJOIN_LICENSE_MODE" = "required" ]; then
+                echo -e "  ${RED}x License activation failed. Setup stopped.${NC}"
+                exit 1
+            else
+                echo -e "  ${YLW}⚠ Không thể kích hoạt license; tiếp tục chạy chế độ miễn phí / local.${NC}"
+            fi
+        else
+            echo -e "  ${BGRN}License activated; raw key was not saved to config${NC}"
+        fi
     fi
-    echo -e "  ${CYN}[LICENSE]${NC} Activating license key..."
-    if ! license_activate "$SETUP_LICENSE_KEY" "$SCRIPT_DIR"; then
-        echo -e "  ${RED}x License activation failed. Setup stopped.${NC}"
-        exit 1
-    fi
-    echo -e "  ${BGRN}License activated; raw key was not saved to config${NC}"
 fi
 
 # ── BƯỚC 3/4: Phát hiện executor ──────────────────────────
