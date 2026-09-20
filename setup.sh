@@ -4,6 +4,11 @@
 # ║      Cách dùng: bash setup.sh [PlaceID] [Code]      ║
 # ╚══════════════════════════════════════════════════════╝
 
+stty sane 2>/dev/null || true
+stty onlcr 2>/dev/null || true
+export TERM="${TERM:-xterm-256color}"
+export PATH="${PATH:-}:/system/bin:/system/xbin:/sbin:/vendor/bin:/data/local/tmp"
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TMP_DIR="${SCRIPT_DIR}/tmp"
 mkdir -p "$TMP_DIR"
