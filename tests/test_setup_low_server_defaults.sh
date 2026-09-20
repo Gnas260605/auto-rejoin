@@ -91,6 +91,14 @@ assert_file_contains "second clone strict enabled" "${TEST_TMP}/config_aya.clone
 (
     cd "$TEST_TMP" || exit 1
     rm -f config_*.cfg
+    PATH="./fakebin:${PATH}" AUTO_REJOIN_MENU_PROMPT_TIMEOUT=0 AUTO_REJOIN_SETUP_LAUNCH_DELAY=0 bash setup.sh 123456 >/dev/null 2>&1
+)
+status=$?
+assert_status "setup menu prompt timeout succeeds" 0 "$status"
+
+(
+    cd "$TEST_TMP" || exit 1
+    rm -f config_*.cfg
     PATH="./fakebin:${PATH}" AUTO_REJOIN_PARENT=true AUTO_REJOIN_JOIN_LOW_SERVER=false bash setup.sh 123456 >/dev/null 2>&1
 )
 status=$?

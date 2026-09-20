@@ -348,6 +348,10 @@ echo -e "${BGRN}+------------------------------------------------------+${NC}"
 
 COUNT=1
 TOTAL=$(echo "$PACKAGES" | wc -w)
+SETUP_LAUNCH_DELAY="${AUTO_REJOIN_SETUP_LAUNCH_DELAY:-${SETUP_LAUNCH_DELAY:-3}}"
+case "$SETUP_LAUNCH_DELAY" in
+    ''|*[!0-9]*) SETUP_LAUNCH_DELAY=3 ;;
+esac
 MULTI_PUBLIC_LOW_SERVER_DEFAULT=false
 if [ "$TOTAL" -gt 1 ] && [ -z "$PRIVATE_CODE" ]; then
     MULTI_PUBLIC_LOW_SERVER_DEFAULT=true
@@ -486,11 +490,13 @@ EOF
         "$COUNT" "$PKG" "[$UNAME_DISPLAY]"
     COUNT=$((COUNT+1))
 
-    # Chờ 10s trước khi mở tab tiếp theo (trừ tab cuối cùng)
+    # Delay ngan truoc khi mo acc tiep theo; co the override bang AUTO_REJOIN_SETUP_LAUNCH_DELAY.
     if [ $COUNT -le $TOTAL ]; then
-        for i in 10 9 8 7 6 5 4 3 2 1; do
+        i="$SETUP_LAUNCH_DELAY"
+        while [ "$i" -gt 0 ]; do
             printf "\r\033[K  ${YLW}⏳ Chờ %ds trước khi mở acc tiếp theo...${NC}" "$i"
             sleep 1
+            i=$((i - 1))
         done
         printf "\r\033[K"
     fi
@@ -616,8 +622,16 @@ echo -e "${BGRN}╚════════════════════�
 echo ""
 
 if [ "$AUTO_REJOIN_PARENT" != "true" ]; then
-    echo -ne "${WHT}Mở Menu điều khiển ngay? (y/N): ${NC}"
-    read -r run_now
+    MENU_PROMPT_TIMEOUT="${AUTO_REJOIN_MENU_PROMPT_TIMEOUT:-${MENU_PROMPT_TIMEOUT:-8}}"
+    case "$MENU_PROMPT_TIMEOUT" in
+        ''|*[!0-9]*) MENU_PROMPT_TIMEOUT=8 ;;
+    esac
+
+    echo -ne "${WHT}Mở Menu điều khiển ngay? (y/N, tự bỏ qua sau ${MENU_PROMPT_TIMEOUT}s): ${NC}"
+    if ! read -r -t "$MENU_PROMPT_TIMEOUT" run_now; then
+        run_now=""
+        printf "\n"
+    fi
     if [ "$run_now" = "y" ] || [ "$run_now" = "Y" ]; then
         bash auto_rejoin.sh
     fi

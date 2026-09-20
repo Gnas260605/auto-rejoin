@@ -967,6 +967,10 @@ launch_roblox() {
     fi
 
     if [ "$low_server_waiting_unique" = "true" ]; then
+        ANDROID_EXECUTOR=direct android_start_activity "$pkg/com.roblox.client.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_start_activity_for_user 0 "$pkg/com.roblox.client.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        ANDROID_EXECUTOR=direct android_start_activity "$pkg/com.roblox.client.startup.ActivitySplash" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_start_activity_for_user 0 "$pkg/com.roblox.client.startup.ActivitySplash" "${bounds_args[@]}" > /dev/null 2>&1 ||
         ANDROID_EXECUTOR=direct android_start_activity "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
         android_start_activity_for_user 0 "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
         android_monkey_package "$pkg" > /dev/null 2>&1
