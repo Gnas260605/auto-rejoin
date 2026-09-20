@@ -849,8 +849,22 @@ launch_roblox() {
             local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
             local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
             log_msg "${CYN}[LOW_SERVER]${NC} Đang quét server ít người cho clone slot #$((idx + 1))..."
-            local server_info
-            server_info="$(low_server_pick_and_reserve "$PLACE_ID" "$min_p" "$max_p" 2>/dev/null || true)"
+            local server_info=""
+            local pick_attempt=1
+            local pick_retries="${LOW_SERVER_PICK_RETRIES:-4}"
+            local pick_retry_delay="${LOW_SERVER_PICK_RETRY_DELAY:-2}"
+            case "$pick_retries" in ''|*[!0-9]*) pick_retries=4 ;; esac
+            case "$pick_retry_delay" in ''|*[!0-9]*) pick_retry_delay=2 ;; esac
+            [ "$pick_retries" -lt 1 ] && pick_retries=1
+
+            while [ "$pick_attempt" -le "$pick_retries" ]; do
+                server_info="$(low_server_pick_and_reserve "$PLACE_ID" "$min_p" "$max_p" 2>/dev/null || true)"
+                [ -n "$server_info" ] && break
+                log_msg "${YLW}[LOW_SERVER]${NC} Chua lay duoc JobId rieng (lan $pick_attempt/$pick_retries), thu lai..."
+                log_event WARN low_server_pick_retry "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" attempt "$pick_attempt" limit "$pick_retries"
+                [ "$pick_attempt" -lt "$pick_retries" ] && [ "$pick_retry_delay" -gt 0 ] && sleep "$pick_retry_delay"
+                pick_attempt=$((pick_attempt + 1))
+            done
             if [ -n "$server_info" ]; then
                 local chosen_job="${server_info%%|*}"
                 local rest="${server_info#*|}"

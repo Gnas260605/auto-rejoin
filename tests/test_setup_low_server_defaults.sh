@@ -85,6 +85,9 @@ assert_status "setup multi public succeeds" 0 "$status"
 
 assert_file_contains "primary clone low server enabled" "${TEST_TMP}/config_com.roblox.client.cfg" "JOIN_LOW_SERVER=true"
 assert_file_contains "primary clone strict enabled" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_STRICT=true"
+assert_file_contains "primary clone check interval fast" "${TEST_TMP}/config_com.roblox.client.cfg" "CHECK_INTERVAL=5"
+assert_file_contains "primary clone low retry count" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_PICK_RETRIES=4"
+assert_file_contains "primary clone low retry delay" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_PICK_RETRY_DELAY=2"
 assert_file_contains "second clone low server enabled" "${TEST_TMP}/config_aya.clone.one.cfg" "JOIN_LOW_SERVER=true"
 assert_file_contains "second clone strict enabled" "${TEST_TMP}/config_aya.clone.one.cfg" "LOW_SERVER_STRICT=true"
 

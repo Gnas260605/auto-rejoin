@@ -24,6 +24,7 @@ reset_config_vars() {
     unset FREEFORM_LAYOUT FREEFORM_WIDTH FREEFORM_HEIGHT FREEFORM_OFFSET_X FREEFORM_OFFSET_Y
     unset LICENSE_MODE AUTO_REJOIN_LICENSE_MODE
     unset JOIN_LOW_SERVER LOW_SERVER_MIN_PLAYERS LOW_SERVER_MAX_PLAYERS LOW_SERVER_STRICT
+    unset LOW_SERVER_PICK_RETRIES LOW_SERVER_PICK_RETRY_DELAY
     unset ALLOW_UNSCOPED_DEEPLINK ALLOW_HOME_FALLBACK
     unset WINDOW_MISSING_THRESHOLD WINDOW_REOPEN_ENABLED LOBBY_RETRY_LIMIT LOBBY_RETRY_DELAY
     unset ROBLOX_API_ENABLED ROBLOX_API_CONNECT_TIMEOUT ROBLOX_API_MAX_TIME ROBLOX_API_CACHE_ENABLED
@@ -99,6 +100,8 @@ valid_config() {
         'FREEFORM_OFFSET_Y=80' \
         'LICENSE_MODE=required' \
         'LOW_SERVER_STRICT=true' \
+        'LOW_SERVER_PICK_RETRIES=6' \
+        'LOW_SERVER_PICK_RETRY_DELAY=1' \
         'ALLOW_UNSCOPED_DEEPLINK=false' \
         'ALLOW_HOME_FALLBACK=false' \
         'WINDOW_MISSING_THRESHOLD=5' \
@@ -113,6 +116,8 @@ valid_config() {
     assert_eq "valid config profile" "BloxFruits" "$PROFILE"
     assert_eq "valid config license mode" "required" "$LICENSE_MODE"
     assert_eq "valid config low strict" "true" "$LOW_SERVER_STRICT"
+    assert_eq "valid config low retries" "6" "$LOW_SERVER_PICK_RETRIES"
+    assert_eq "valid config low retry delay" "1" "$LOW_SERVER_PICK_RETRY_DELAY"
     assert_eq "valid config unscoped fallback" "false" "$ALLOW_UNSCOPED_DEEPLINK"
     assert_eq "valid config home fallback" "false" "$ALLOW_HOME_FALLBACK"
     assert_eq "valid config window threshold" "5" "$WINDOW_MISSING_THRESHOLD"
@@ -223,6 +228,8 @@ missing_config_uses_defaults() {
     assert_eq "default check interval" "30" "$CHECK_INTERVAL"
     assert_eq "default profile" "default" "$PROFILE"
     assert_eq "default low strict" "false" "$LOW_SERVER_STRICT"
+    assert_eq "default low retries" "4" "$LOW_SERVER_PICK_RETRIES"
+    assert_eq "default low retry delay" "2" "$LOW_SERVER_PICK_RETRY_DELAY"
     assert_eq "default unscoped fallback" "false" "$ALLOW_UNSCOPED_DEEPLINK"
     assert_eq "default home fallback" "false" "$ALLOW_HOME_FALLBACK"
     assert_eq "default window threshold" "3" "$WINDOW_MISSING_THRESHOLD"
@@ -252,6 +259,8 @@ save_and_reload() {
     ROBLOX_PACKAGE=com.roblox.client_clone2
     ROBLOX_USERNAME=Acc02
     LOW_SERVER_STRICT=true
+    LOW_SERVER_PICK_RETRIES=7
+    LOW_SERVER_PICK_RETRY_DELAY=3
     ALLOW_UNSCOPED_DEEPLINK=true
     ROBLOX_API_ENABLED=true
     ROBLOX_USER_ID=123456789
@@ -270,6 +279,8 @@ save_and_reload() {
     assert_eq "reload saved PLACE_ID" "999" "$PLACE_ID"
     assert_eq "reload saved username" "Acc02" "$ROBLOX_USERNAME"
     assert_eq "reload saved low strict" "true" "$LOW_SERVER_STRICT"
+    assert_eq "reload saved low retries" "7" "$LOW_SERVER_PICK_RETRIES"
+    assert_eq "reload saved low retry delay" "3" "$LOW_SERVER_PICK_RETRY_DELAY"
     assert_eq "reload saved unscoped fallback" "true" "$ALLOW_UNSCOPED_DEEPLINK"
     assert_eq "reload saved user id" "123456789" "$ROBLOX_USER_ID"
     assert_eq "reload saved presence enabled" "true" "$PRESENCE_ENABLED"

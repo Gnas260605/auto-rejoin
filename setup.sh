@@ -338,6 +338,8 @@ if [ -f "config.cfg" ]; then
     DEFAULT_LOW_MIN=$(grep '^LOW_SERVER_MIN_PLAYERS=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     DEFAULT_LOW_MAX=$(grep '^LOW_SERVER_MAX_PLAYERS=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     DEFAULT_LOW_STRICT=$(grep '^LOW_SERVER_STRICT=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+    DEFAULT_LOW_PICK_RETRIES=$(grep '^LOW_SERVER_PICK_RETRIES=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+    DEFAULT_LOW_PICK_RETRY_DELAY=$(grep '^LOW_SERVER_PICK_RETRY_DELAY=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     DEFAULT_ALLOW_UNSCOPED=$(grep '^ALLOW_UNSCOPED_DEEPLINK=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     DEFAULT_ALLOW_HOME=$(grep '^ALLOW_HOME_FALLBACK=' config.cfg | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
 fi
@@ -382,6 +384,8 @@ for PKG in $PACKAGES; do
     EXISTING_LOW_MIN=""
     EXISTING_LOW_MAX=""
     EXISTING_LOW_STRICT=""
+    EXISTING_LOW_PICK_RETRIES=""
+    EXISTING_LOW_PICK_RETRY_DELAY=""
     EXISTING_ALLOW_UNSCOPED=""
     EXISTING_ALLOW_HOME=""
 
@@ -405,6 +409,8 @@ for PKG in $PACKAGES; do
         EXISTING_LOW_MIN=$(grep '^LOW_SERVER_MIN_PLAYERS=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_LOW_MAX=$(grep '^LOW_SERVER_MAX_PLAYERS=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_LOW_STRICT=$(grep '^LOW_SERVER_STRICT=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+        EXISTING_LOW_PICK_RETRIES=$(grep '^LOW_SERVER_PICK_RETRIES=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
+        EXISTING_LOW_PICK_RETRY_DELAY=$(grep '^LOW_SERVER_PICK_RETRY_DELAY=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_ALLOW_UNSCOPED=$(grep '^ALLOW_UNSCOPED_DEEPLINK=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_ALLOW_HOME=$(grep '^ALLOW_HOME_FALLBACK=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
     fi
@@ -414,6 +420,9 @@ for PKG in $PACKAGES; do
     # Lấy giá trị hiện tại (ưu tiên của account -> mặc định chung -> mặc định mặc định)
     DISCORD_WEBHOOK="${EXISTING_WEBHOOK:-$DEFAULT_WEBHOOK}"
     CHECK_INTERVAL="${EXISTING_CHECK_INTERVAL:-${DEFAULT_CHECK_INTERVAL:-30}}"
+    if [ "$MULTI_PUBLIC_LOW_SERVER_DEFAULT" = "true" ] && { [ -z "$EXISTING_CHECK_INTERVAL" ] || [ "$EXISTING_CHECK_INTERVAL" = "30" ]; }; then
+        CHECK_INTERVAL="${SETUP_CHECK_INTERVAL:-5}"
+    fi
     AUTO_RESTART_PERIOD="${EXISTING_AUTO_RESTART:-${DEFAULT_AUTO_RESTART:-0}}"
     ANTI_AFK="${EXISTING_ANTI_AFK:-${DEFAULT_ANTI_AFK:-true}}"
     AFK_TAP_INTERVAL="${EXISTING_TAP_INTERVAL:-${DEFAULT_TAP_INTERVAL:-180}}"
@@ -435,6 +444,8 @@ for PKG in $PACKAGES; do
     fi
     LOW_SERVER_MIN_PLAYERS="${SETUP_LOW_SERVER_MIN_PLAYERS:-${EXISTING_LOW_MIN:-${DEFAULT_LOW_MIN:-1}}}"
     LOW_SERVER_MAX_PLAYERS="${SETUP_LOW_SERVER_MAX_PLAYERS:-${EXISTING_LOW_MAX:-${DEFAULT_LOW_MAX:-0}}}"
+    LOW_SERVER_PICK_RETRIES="${SETUP_LOW_SERVER_PICK_RETRIES:-${EXISTING_LOW_PICK_RETRIES:-${DEFAULT_LOW_PICK_RETRIES:-4}}}"
+    LOW_SERVER_PICK_RETRY_DELAY="${SETUP_LOW_SERVER_PICK_RETRY_DELAY:-${EXISTING_LOW_PICK_RETRY_DELAY:-${DEFAULT_LOW_PICK_RETRY_DELAY:-2}}}"
     if [ -n "$SETUP_LOW_SERVER_STRICT" ]; then
         LOW_SERVER_STRICT="$SETUP_LOW_SERVER_STRICT"
     elif [ "$JOIN_LOW_SERVER" = "true" ] && [ "$MULTI_PUBLIC_LOW_SERVER_DEFAULT" = "true" ]; then
@@ -468,6 +479,8 @@ JOIN_LOW_SERVER=$JOIN_LOW_SERVER
 LOW_SERVER_MIN_PLAYERS=$LOW_SERVER_MIN_PLAYERS
 LOW_SERVER_MAX_PLAYERS=$LOW_SERVER_MAX_PLAYERS
 LOW_SERVER_STRICT=$LOW_SERVER_STRICT
+LOW_SERVER_PICK_RETRIES=$LOW_SERVER_PICK_RETRIES
+LOW_SERVER_PICK_RETRY_DELAY=$LOW_SERVER_PICK_RETRY_DELAY
 ALLOW_UNSCOPED_DEEPLINK=$ALLOW_UNSCOPED_DEEPLINK
 ALLOW_HOME_FALLBACK=$ALLOW_HOME_FALLBACK
 EXECUTOR="$EXECUTOR_TYPE"
