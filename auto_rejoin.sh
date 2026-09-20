@@ -1066,6 +1066,76 @@ launch_roblox() {
     log_msg "${GRN}[LAUNCH]${NC} Đã gửi lệnh mở game. Chờ ${LAUNCH_GRACE}s trước khi giám sát..."
 }
 
+launch_roblox_non_destructive() {
+    local reason="${1:-startup_wake}"
+    local pkg="${ROBLOX_PACKAGE}"
+    local link=""
+    local ret=1
+    local wake_success=false
+    log_msg "${YLW}[WAKE]${NC} Non-destructive wake Roblox ${CYN}($pkg)${NC}..."
+    log_event INFO startup_wake_attempt "$LOG_FILE" package "$pkg" reason "$reason" place_id "$PLACE_ID"
+
+    if [ -n "$PRIVATE_CODE" ]; then
+        link="$(roblox_build_private_server_uri "$PRIVATE_CODE")" || link=""
+    elif [ "${JOIN_LOW_SERVER:-false}" = "true" ]; then
+        local min_p="${LOW_SERVER_MIN_PLAYERS:-1}"
+        local max_p="${LOW_SERVER_MAX_PLAYERS:-0}"
+        local server_info
+        server_info="$(low_server_pick_and_reserve "$PLACE_ID" "$min_p" "$max_p" 2>/dev/null || true)"
+        if [ -n "$server_info" ]; then
+            local chosen_job="${server_info%%|*}"
+            CURRENT_LOW_SERVER_JOB="$chosen_job"
+            link="$(roblox_build_game_uri "$PLACE_ID" "$chosen_job")" || link=""
+            log_event INFO low_server_wake_job_selected "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" job "$chosen_job"
+        else
+            log_event WARN low_server_waiting_for_unique_server "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" reason "$reason"
+        fi
+    else
+        link="$(roblox_build_game_uri "$PLACE_ID")" || link=""
+    fi
+
+    if [ -n "$link" ]; then
+        android_start_uri_for_user 0 "$pkg" "$link" > /dev/null 2>&1
+        ret=$?
+        [ $ret -eq 0 ] && wake_success=true
+
+        if [ $ret -ne 0 ]; then
+            android_start_uri "$pkg" "$link" > /dev/null 2>&1
+            ret=$?
+            [ $ret -eq 0 ] && wake_success=true
+        fi
+
+        if [ $ret -ne 0 ]; then
+            android_exec am start --user 0 -n "$pkg/com.roblox.client.ActivityProtocolLaunch" -a android.intent.action.VIEW -d "$link" > /dev/null 2>&1 ||
+            android_exec am start -n "$pkg/com.roblox.client.ActivityProtocolLaunch" -a android.intent.action.VIEW -d "$link" > /dev/null 2>&1
+            ret=$?
+            [ $ret -eq 0 ] && wake_success=true
+        fi
+    fi
+
+    if [ "$wake_success" != "true" ]; then
+        android_start_activity_for_user 0 "$pkg/com.roblox.client.MainActivity" > /dev/null 2>&1 ||
+        android_start_activity "$pkg/com.roblox.client.MainActivity" > /dev/null 2>&1 ||
+        android_start_activity_for_user 0 "$pkg/com.roblox.client.startup.ActivitySplash" > /dev/null 2>&1 ||
+        android_start_activity "$pkg/com.roblox.client.startup.ActivitySplash" > /dev/null 2>&1 ||
+        android_monkey_package "$pkg" > /dev/null 2>&1
+        ret=$?
+        [ $ret -eq 0 ] && wake_success=true
+    fi
+
+    if [ "$wake_success" != "true" ]; then
+        log_event WARN startup_wake_failed "$LOG_FILE" package "$pkg" reason "$reason" place_id "$PLACE_ID"
+        return 1
+    fi
+
+    LAST_LAUNCH=$(date +%s)
+    LOADING_STARTED_AT="$LAST_LAUNCH"
+    WINDOW_MISSING_COUNT=0
+    TAP_ON_LOAD_DONE=false
+    log_event INFO startup_wake_success "$LOG_FILE" package "$pkg" reason "$reason" place_id "$PLACE_ID"
+    return 0
+}
+
 
 # ── Kiểm tra mạng ────────────────────────────────────────
 check_internet() {
@@ -1093,13 +1163,7 @@ check_roblox_window_visible() {
         return 1
     fi
 
-    # 2. Nếu process đang chạy và đã từng vào game (LAST_IN_GAME > 0):
-    # Luôn coi là visible để bảo vệ tuyệt đối các tab clone / freeform / floating window / chạy nền
-    if [ "${LAST_IN_GAME:-0}" -gt 0 ]; then
-        return 0
-    fi
-
-    # 3. Check qua shared snapshot nếu còn mới
+    # 2. Check qua shared snapshot nếu còn mới
     if [ -f "${TMP_DIR}/roblox_windows.txt" ]; then
         local mtime now
         mtime=$(stat -c %Y "${TMP_DIR}/roblox_windows.txt" 2>/dev/null || stat -f %m "${TMP_DIR}/roblox_windows.txt" 2>/dev/null)
@@ -1109,23 +1173,18 @@ check_roblox_window_visible() {
         fi
     fi
 
-    # 4. Check window visible qua dumpsys (surface visible / window focused / top activity)
+    # 3. Check window visible qua dumpsys (surface visible / window focused / top activity)
     if android_is_window_visible "$pkg" 2>/dev/null; then
         return 0
     fi
 
-    # 5. Check window record (tồn tại trong WindowManager kể cả khi freeform nằm phía sau)
+    # 4. Check window record (tồn tại trong WindowManager kể cả khi freeform nằm phía sau)
     if android_has_window_record "$pkg" 2>/dev/null; then
         return 0
     fi
 
-    # 6. Check task present
-    if android_is_task_present "$pkg" 2>/dev/null; then
-        return 0
-    fi
-
-    # 7. Fallback: Nếu process đang chạy thì cửa sổ vẫn đang mở
-    return 0
+    # Task/process alive is weak evidence only, not window visibility.
+    return 1
 }
 
 # ── Kiểm tra log xem có session game đang active không ────
@@ -1135,6 +1194,7 @@ check_roblox_log_for_game_session() {
     if declare -F session_poll_incremental >/dev/null 2>&1; then
         session_poll_incremental "$pkg" >/dev/null 2>&1 || true
         session_is_game_ready "$pkg" && return 0
+        return 1
     fi
     local log_dir=""
 
@@ -1294,14 +1354,6 @@ is_in_game() {
             return 1
         fi
         if grep -i "$pkg" "${TMP_DIR}/roblox_activities.txt" | grep -qiE "GameActivity|NativeActivity|ActivityProtocolLaunch|RobloxAppActivity"; then
-            return 0
-        fi
-    fi
-
-    # 7. Fallback cho Freeform Clones: Task tồn tại, process sống và đã qua 15s kể từ khi mở
-    if check_roblox_task_present; then
-        local now; now=$(date +%s)
-        if [ "$((now - LAST_LAUNCH))" -ge 15 ]; then
             return 0
         fi
     fi

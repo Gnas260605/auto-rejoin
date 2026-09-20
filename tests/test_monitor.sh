@@ -65,6 +65,7 @@ MONITOR_NOW=1000
 LOG_MESSAGES=""
 DISCORD_COUNT=0
 LAUNCH_COUNT=0
+WAKE_COUNT=0
 FORCE_STOP_COUNT=0
 TAP_COUNT=0
 REJOIN_COUNT=0
@@ -80,6 +81,7 @@ WRONG_PLACE=false
 APP_HOME=false
 QUEUE=false
 LAUNCH_OK=true
+WAKE_OK=true
 CLEAR_DISCONNECT_ON_SLEEP=false
 
 test_sleep() {
@@ -119,6 +121,13 @@ launch_roblox() {
     LOADING_STARTED_AT="$MONITOR_NOW"
 }
 
+launch_roblox_non_destructive() {
+    [ "${WAKE_OK:-true}" = "true" ] || return 1
+    WAKE_COUNT=$((WAKE_COUNT + 1))
+    LAST_LAUNCH="$MONITOR_NOW"
+    LOADING_STARTED_AT="$MONITOR_NOW"
+}
+
 android_force_stop() { FORCE_STOP_COUNT=$((FORCE_STOP_COUNT + 1)); }
 android_input_tap() { TAP_COUNT=$((TAP_COUNT + 1)); }
 inc_rejoin_count() { REJOIN_COUNT=$((REJOIN_COUNT + 1)); }
@@ -130,6 +139,7 @@ reset_monitor_state() {
     LOG_MESSAGES=""
     DISCORD_COUNT=0
     LAUNCH_COUNT=0
+    WAKE_COUNT=0
     FORCE_STOP_COUNT=0
     TAP_COUNT=0
     REJOIN_COUNT=0
@@ -145,6 +155,7 @@ reset_monitor_state() {
     APP_HOME=false
     QUEUE=false
     LAUNCH_OK=true
+    WAKE_OK=true
     CLEAR_DISCONNECT_ON_SLEEP=false
     LAST_RESTART=0
     LAST_AFK_TAP=0
@@ -158,6 +169,10 @@ reset_monitor_state() {
     WINDOW_MISSING_COUNT=0
     WINDOW_MISSING_THRESHOLD=3
     WINDOW_REOPEN_ENABLED=true
+    UNKNOWN_ACTIVE_WAKE_AFTER=60
+    UNKNOWN_ACTIVE_WAKE_BACKOFF=60
+    STALLED_ACTIVE_TIMEOUT=180
+    HEARTBEAT_STALE_SECONDS=0
     LOBBY_RETRY_LIMIT=3
     LOBBY_RETRY_DELAY=3
     TAP_ON_LOAD_DONE=false
@@ -178,6 +193,9 @@ reset_monitor_state() {
     MONITOR_RECOVERY_REASON=""
     MONITOR_RECOVERY_COUNT_REJOIN=true
     MONITOR_RECOVERY_AUTHORIZED_BY=""
+    MONITOR_LOOP_ITERATION=0
+    UNKNOWN_ACTIVE_LAST_WAKE_AT=0
+    STALLED_ACTIVE_STARTED_AT=0
     MONITOR_OFFLINE_NOTIFIED=false
     MONITOR_COOLDOWN_NOTIFIED=false
     RUNTIME_BACKOFF_FAILURES=0
@@ -407,13 +425,43 @@ test_startup_dead_process_launches() {
     assert_eq "startup launch count" "1" "$LAUNCH_COUNT"
 }
 
+test_startup_existing_game_protected() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
+    IN_GAME=true
+    monitor_tick
+    assert_eq "startup existing game -> IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    assert_eq "startup existing game force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "startup existing game fresh launch=0" "0" "$LAUNCH_COUNT"
+}
+
+test_startup_unknown_non_destructive_wake() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
+    monitor_tick
+    assert_eq "startup unknown -> LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
+    assert_eq "startup unknown wake=1" "1" "$WAKE_COUNT"
+    assert_eq "startup unknown force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "startup unknown fresh launch=0" "0" "$LAUNCH_COUNT"
+}
+
+test_startup_app_home_recovery_requested() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
+    APP_HOME=true
+    monitor_tick
+    assert_eq "startup app home -> RECOVERING" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "startup app home reason" "startup_app_home" "$MONITOR_RECOVERY_REASON"
+}
+
 test_launch_failure_without_gate_stays_protected() {
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_LAUNCHING"
-    LAUNCH_OK=false
+    WAKE_OK=false
     monitor_tick
     assert_eq "launch while active protected" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
     assert_eq "launch while active count=0" "0" "$LAUNCH_COUNT"
+    assert_eq "launch while active wake=0" "0" "$WAKE_COUNT"
 }
 
 test_screen_disconnect_authorized() {
@@ -471,6 +519,58 @@ test_anti_afk_only_when_confirmed() {
     assert_eq "anti-afk tap in confirmed game" "1" "$TAP_COUNT"
 }
 
+test_unknown_active_wake_succeeds() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_UNKNOWN_ACTIVE"
+    MONITOR_STATE_CHANGED_AT=900
+    LAST_LAUNCH=900
+    MONITOR_NOW=1000
+    monitor_tick
+    assert_eq "8 UNKNOWN_ACTIVE wake succeeds -> LOADING" "$MONITOR_STATE_LOADING" "$MONITOR_STATE"
+    assert_eq "8 UNKNOWN_ACTIVE wake count" "1" "$WAKE_COUNT"
+}
+
+test_unknown_active_wake_fails_then_stalls() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_UNKNOWN_ACTIVE"
+    MONITOR_STATE_CHANGED_AT=700
+    LAST_LAUNCH=700
+    MONITOR_NOW=1000
+    WAKE_OK=false
+    monitor_tick
+    assert_eq "9 UNKNOWN_ACTIVE failed wake -> STALLED" "$MONITOR_STATE_STALLED_ACTIVE" "$MONITOR_STATE"
+    monitor_tick
+    assert_eq "9 STALLED requests recovery" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "9 no force-stop before recovery tick" "0" "$FORCE_STOP_COUNT"
+}
+
+test_task_present_not_in_game_without_ready() {
+    reset_monitor_state
+    TASK_PRESENT=true
+    IN_GAME=false
+    LAST_LAUNCH=900
+    MONITOR_NOW=1000
+    if is_in_game; then
+        fail "5 task present alone NOT IN_GAME"
+    else
+        pass "5 task present alone NOT IN_GAME"
+    fi
+}
+
+test_stalled_active_authorizes_controlled_recovery() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_UNKNOWN_ACTIVE"
+    MONITOR_STATE_CHANGED_AT=700
+    LAST_LAUNCH=700
+    MONITOR_NOW=1000
+    monitor_tick
+    assert_eq "7 stalled active detected" "$MONITOR_STATE_STALLED_ACTIVE" "$MONITOR_STATE"
+    monitor_tick
+    assert_eq "7 stalled active -> recovery" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    monitor_tick
+    assert_eq "7 stalled active force-stop once" "1" "$FORCE_STOP_COUNT"
+}
+
 test_protected_in_game_latch
 test_not_top_activity_protected
 test_no_window_record_protected
@@ -491,12 +591,19 @@ test_in_game_to_disconnected_requires_fresh
 test_loading_timeout_unconfirmed_no_force
 test_rejoin_count_only_after_gate
 test_startup_dead_process_launches
+test_startup_existing_game_protected
+test_startup_unknown_non_destructive_wake
+test_startup_app_home_recovery_requested
 test_launch_failure_without_gate_stays_protected
 test_screen_disconnect_authorized
 test_wrong_place_goes_to_recovery_but_gate_protects_without_evidence
 test_queue_without_disconnect_cannot_force_stop
 test_cooldown_expired_rechecks_gate
 test_anti_afk_only_when_confirmed
+test_unknown_active_wake_succeeds
+test_unknown_active_wake_fails_then_stalls
+test_task_present_not_in_game_without_ready
+test_stalled_active_authorizes_controlled_recovery
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

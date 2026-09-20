@@ -10,6 +10,7 @@ MONITOR_STATE_RECOVERING="RECOVERING"
 MONITOR_STATE_COOLDOWN="COOLDOWN"
 MONITOR_STATE_OFFLINE="OFFLINE"
 MONITOR_STATE_UNKNOWN_ACTIVE="UNKNOWN_ACTIVE"
+MONITOR_STATE_STALLED_ACTIVE="STALLED_ACTIVE"
 MONITOR_STATE_ERROR="ERROR"
 
 MONITOR_STATE="${MONITOR_STATE:-$MONITOR_STATE_STOPPED}"
@@ -21,6 +22,9 @@ MONITOR_RECOVERY_COUNT_REJOIN="${MONITOR_RECOVERY_COUNT_REJOIN:-true}"
 MONITOR_OFFLINE_NOTIFIED="${MONITOR_OFFLINE_NOTIFIED:-false}"
 MONITOR_COOLDOWN_NOTIFIED="${MONITOR_COOLDOWN_NOTIFIED:-false}"
 MONITOR_RECOVERY_AUTHORIZED_BY="${MONITOR_RECOVERY_AUTHORIZED_BY:-}"
+MONITOR_LOOP_ITERATION="${MONITOR_LOOP_ITERATION:-0}"
+UNKNOWN_ACTIVE_LAST_WAKE_AT="${UNKNOWN_ACTIVE_LAST_WAKE_AT:-0}"
+STALLED_ACTIVE_STARTED_AT="${STALLED_ACTIVE_STARTED_AT:-0}"
 LOADING_STARTED_AT="${LOADING_STARTED_AT:-0}"
 WINDOW_MISSING_COUNT="${WINDOW_MISSING_COUNT:-0}"
 LOBBY_RETRY_COUNT="${LOBBY_RETRY_COUNT:-0}"
@@ -29,6 +33,10 @@ WINDOW_MISSING_THRESHOLD="${WINDOW_MISSING_THRESHOLD:-3}"
 WINDOW_REOPEN_ENABLED="${WINDOW_REOPEN_ENABLED:-true}"
 LOBBY_RETRY_LIMIT="${LOBBY_RETRY_LIMIT:-3}"
 LOBBY_RETRY_DELAY="${LOBBY_RETRY_DELAY:-3}"
+UNKNOWN_ACTIVE_WAKE_AFTER="${UNKNOWN_ACTIVE_WAKE_AFTER:-60}"
+UNKNOWN_ACTIVE_WAKE_BACKOFF="${UNKNOWN_ACTIVE_WAKE_BACKOFF:-60}"
+STALLED_ACTIVE_TIMEOUT="${STALLED_ACTIVE_TIMEOUT:-180}"
+HEARTBEAT_STALE_SECONDS="${HEARTBEAT_STALE_SECONDS:-0}"
 
 monitor_now() {
     if [ -n "${MONITOR_NOW:-}" ]; then
@@ -68,6 +76,25 @@ monitor_transition() {
     monitor_set_state "$@"
 }
 
+monitor_heartbeat_file() {
+    local safe_pkg="${ROBLOX_PACKAGE:-unknown}"
+    safe_pkg="${safe_pkg//[^A-Za-z0-9_.-]/_}"
+    printf '%s/heartbeat_%s.dat\n' "${TMP_DIR:-tmp}" "$safe_pkg"
+}
+
+monitor_write_heartbeat() {
+    local duration="${1:-0}"
+    local file
+    file="$(monitor_heartbeat_file)"
+    mkdir -p "${TMP_DIR:-tmp}" 2>/dev/null || true
+    {
+        printf 'timestamp=%s\n' "$(monitor_now)"
+        printf 'state=%s\n' "$MONITOR_STATE"
+        printf 'loop_iteration=%s\n' "${MONITOR_LOOP_ITERATION:-0}"
+        printf 'last_tick_duration=%s\n' "$duration"
+    } > "${file}.tmp" 2>/dev/null && mv "${file}.tmp" "$file" 2>/dev/null
+}
+
 monitor_request_recovery() {
     MONITOR_RECOVERY_REASON="$1"
     MONITOR_RECOVERY_COUNT_REJOIN="${2:-true}"
@@ -104,7 +131,16 @@ monitor_recovery_is_authorized() {
         fi
     fi
 
+    if [ "$reason" = "stalled_active" ] && monitor_stall_detected; then
+        MONITOR_RECOVERY_AUTHORIZED_BY="stalled_active"
+        log_event WARN stalled_active_recovery_authorized "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
+        return 0
+    fi
+
     MONITOR_RECOVERY_AUTHORIZED_BY="active_session_protected"
+    if [ "$reason" = "stalled_active" ]; then
+        log_event WARN stalled_active_recovery_denied "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
+    fi
     log_event WARN recovery_cancelled "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason" gate_reason "$MONITOR_RECOVERY_AUTHORIZED_BY" last_in_game "${LAST_IN_GAME:-0}"
     return 1
 }
@@ -208,6 +244,63 @@ monitor_disconnect_detected() {
     return 1
 }
 
+monitor_confirmed_game_active() {
+    if declare -F session_poll_incremental >/dev/null 2>&1; then
+        session_poll_incremental "$ROBLOX_PACKAGE" >/dev/null 2>&1 || true
+        if declare -F session_is_game_ready >/dev/null 2>&1 && session_is_game_ready "$ROBLOX_PACKAGE"; then
+            return 0
+        fi
+        if declare -F session_is_game_ready >/dev/null 2>&1; then
+            if [ "${LAST_IN_GAME:-0}" -gt 0 ] && ! monitor_disconnect_detected; then
+                return 0
+            fi
+            return 1
+        fi
+    fi
+    is_in_game
+}
+
+monitor_non_destructive_wake() {
+    local reason="${1:-unknown_active_wake}"
+    log_event INFO startup_non_destructive_wake "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
+    if declare -F launch_roblox_non_destructive >/dev/null 2>&1; then
+        launch_roblox_non_destructive "$reason"
+        return $?
+    fi
+    launch_roblox
+}
+
+monitor_stall_detected() {
+    local now launch_age unknown_age session_state network_ok=false game_ready=false
+
+    is_roblox_running || return 1
+    monitor_disconnect_detected && return 1
+    check_internet && network_ok=true
+    [ "$network_ok" = "true" ] || return 1
+
+    if monitor_confirmed_game_active; then
+        game_ready=true
+    fi
+    [ "$game_ready" = "false" ] || return 1
+
+    if declare -F detect_roblox_session_state >/dev/null 2>&1; then
+        session_state="$(detect_roblox_session_state 2>/dev/null || printf 'UNKNOWN')"
+        [ "$session_state" = "APP_HOME" ] && return 1
+        [ "$session_state" = "GAME_ACTIVE" ] && return 1
+    fi
+
+    now="$(monitor_now)"
+    launch_age=$((now - ${LAST_LAUNCH:-0}))
+    if [ "$MONITOR_STATE" = "$MONITOR_STATE_STALLED_ACTIVE" ] || [ "${MONITOR_RECOVERY_REASON:-}" = "stalled_active" ]; then
+        unknown_age="${UNKNOWN_ACTIVE_WAKE_AFTER:-60}"
+    else
+        unknown_age=$((now - ${MONITOR_STATE_CHANGED_AT:-now}))
+    fi
+    [ "$launch_age" -ge "${STALLED_ACTIVE_TIMEOUT:-180}" ] || return 1
+    [ "$unknown_age" -ge "${UNKNOWN_ACTIVE_WAKE_AFTER:-60}" ] || return 1
+    return 0
+}
+
 monitor_launch_once() {
     STABLE_SINCE=0
     LOADING_STARTED_AT="$(monitor_now)"
@@ -237,7 +330,39 @@ monitor_launch_once() {
 }
 
 monitor_handle_launching() {
-    monitor_launch_once "${MONITOR_REASON:-startup}" || return 0
+    local now session_state
+    now="$(monitor_now)"
+
+    if ! is_roblox_running; then
+        log_event INFO startup_process_dead "$LOG_FILE" package "$ROBLOX_PACKAGE"
+        monitor_launch_once "${MONITOR_REASON:-startup}" || return 0
+        return 0
+    fi
+
+    if monitor_confirmed_game_active; then
+        LAST_IN_GAME="$now"
+        log_event INFO startup_existing_game_protected "$LOG_FILE" package "$ROBLOX_PACKAGE" last_in_game "$LAST_IN_GAME"
+        monitor_transition "$MONITOR_STATE_IN_GAME" "startup_existing_game"
+        return 0
+    fi
+
+    if declare -F detect_roblox_session_state >/dev/null 2>&1; then
+        session_state="$(detect_roblox_session_state 2>/dev/null || printf 'UNKNOWN')"
+        if [ "$session_state" = "APP_HOME" ]; then
+            log_event WARN app_home_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" reason "startup"
+            monitor_request_recovery "startup_app_home" "true"
+            return 0
+        fi
+    fi
+
+    log_event WARN startup_existing_process_unknown "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" state "${session_state:-UNKNOWN}"
+    if monitor_non_destructive_wake "startup_unknown_process"; then
+        log_event INFO startup_non_destructive_wake_success "$LOG_FILE" package "$ROBLOX_PACKAGE"
+        monitor_transition "$MONITOR_STATE_LOADING" "startup_non_destructive_wake"
+    else
+        log_event WARN startup_non_destructive_wake_failed "$LOG_FILE" package "$ROBLOX_PACKAGE"
+        monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "startup_wake_failed"
+    fi
 }
 
 monitor_handle_loading() {
@@ -314,7 +439,7 @@ monitor_handle_loading() {
         fi
     fi
 
-    if is_in_game; then
+    if monitor_confirmed_game_active; then
         LAST_IN_GAME="$now"
         WINDOW_MISSING_COUNT=0
         if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
@@ -418,7 +543,7 @@ monitor_handle_in_game() {
         fi
     fi
 
-    if ! is_in_game; then
+    if ! monitor_confirmed_game_active; then
         LOADING_STARTED_AT="$now"
         monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "game_activity_missing_unconfirmed"
         return 0
@@ -582,10 +707,41 @@ monitor_tick() {
                 monitor_transition "$MONITOR_STATE_CRASHED" "process_missing"
             elif monitor_disconnect_detected; then
                 monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
-            elif is_in_game; then
+            elif monitor_confirmed_game_active; then
                 monitor_transition "$MONITOR_STATE_IN_GAME" "active_session_confirmed"
+            elif monitor_stall_detected; then
+                STALLED_ACTIVE_STARTED_AT="$(monitor_now)"
+                log_event WARN stalled_active_detected "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
+                monitor_transition "$MONITOR_STATE_STALLED_ACTIVE" "stalled_active_detected"
             else
-                log_event INFO unknown_active_observe "$LOG_FILE" package "$ROBLOX_PACKAGE" last_in_game "${LAST_IN_GAME:-0}"
+                local now unknown_age since_wake
+                now="$(monitor_now)"
+                unknown_age=$((now - ${MONITOR_STATE_CHANGED_AT:-now}))
+                since_wake=$((now - ${UNKNOWN_ACTIVE_LAST_WAKE_AT:-0}))
+                if [ "$unknown_age" -ge "${UNKNOWN_ACTIVE_WAKE_AFTER:-60}" ] && [ "$since_wake" -ge "${UNKNOWN_ACTIVE_WAKE_BACKOFF:-60}" ]; then
+                    log_event WARN unknown_active_timeout "$LOG_FILE" package "$ROBLOX_PACKAGE" age "$unknown_age"
+                    UNKNOWN_ACTIVE_LAST_WAKE_AT="$now"
+                    if monitor_non_destructive_wake "unknown_active_timeout"; then
+                        monitor_transition "$MONITOR_STATE_LOADING" "unknown_active_wake"
+                    else
+                        log_event WARN startup_non_destructive_wake_failed "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "unknown_active_timeout"
+                    fi
+                else
+                    log_event INFO unknown_active_observe "$LOG_FILE" package "$ROBLOX_PACKAGE" last_in_game "${LAST_IN_GAME:-0}" age "$unknown_age"
+                fi
+            fi
+            ;;
+        "$MONITOR_STATE_STALLED_ACTIVE")
+            if ! is_roblox_running; then
+                monitor_transition "$MONITOR_STATE_CRASHED" "process_missing"
+            elif monitor_disconnect_detected; then
+                monitor_transition "$MONITOR_STATE_DISCONNECTED" "disconnect_detected"
+            elif monitor_confirmed_game_active; then
+                monitor_transition "$MONITOR_STATE_IN_GAME" "active_session_confirmed"
+            elif monitor_stall_detected; then
+                monitor_request_recovery "stalled_active" "true"
+            else
+                monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "stall_cleared"
             fi
             ;;
         *)
@@ -618,6 +774,9 @@ monitor_run() {
     MONITOR_REASON="startup"
     MONITOR_OFFLINE_NOTIFIED=false
     MONITOR_COOLDOWN_NOTIFIED=false
+    MONITOR_LOOP_ITERATION=0
+    UNKNOWN_ACTIVE_LAST_WAKE_AT=0
+    STALLED_ACTIVE_STARTED_AT=0
 
     clear
     echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"
@@ -632,7 +791,12 @@ monitor_run() {
     monitor_transition "$MONITOR_STATE_LAUNCHING" "startup"
 
     while true; do
+        local tick_start tick_end
+        tick_start="$(monitor_now)"
+        MONITOR_LOOP_ITERATION=$((MONITOR_LOOP_ITERATION + 1))
         monitor_tick || monitor_transition "$MONITOR_STATE_ERROR" "tick_failed"
+        tick_end="$(monitor_now)"
+        monitor_write_heartbeat "$((tick_end - tick_start))"
         monitor_sleep "$CHECK_INTERVAL"
     done
 }

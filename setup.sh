@@ -496,7 +496,7 @@ EOF
     tmux set-window-option -t "roblox-multi:${WIN}" automatic-rename off 2>/dev/null
     tmux set-window-option -t "roblox-multi:${WIN}" remain-on-exit on 2>/dev/null
     tmux respawn-pane -k -t "roblox-multi:${WIN}" -c "$PWD" \
-        "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
+	    "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
 
     UNAME_DISPLAY="${SAVED_USERNAME:-N/A}"
     printf "  ${BGRN}✓${NC} Acc ${YLW}%2d${NC}: ${CYN}%-26s${NC} ${GRN}%-10s${NC}\n" \
@@ -590,19 +590,42 @@ while true; do
             fi
         fi
 
-        if [ "$bot_running" = "false" ]; then
-            echo -e "  ${RED}[WATCHDOG]${NC} Bot '${WIN}' không chạy! Đang khởi động lại..."
-            if [ -z "$WIN_PANE" ]; then
-                tmux new-window -t roblox-multi -n "$WIN" 2>/dev/null
-                tmux set-window-option -t "roblox-multi:${WIN}" automatic-rename off 2>/dev/null
-                tmux set-window-option -t "roblox-multi:${WIN}" remain-on-exit on 2>/dev/null
-            fi
-            tmux respawn-pane -k -t "roblox-multi:${WIN}" -c "$PROJECT_DIR" \
-                "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
-            echo -e "  ${GRN}[WATCHDOG]${NC} Đã restart bot cho: ${CYN}$PKG${NC}"
-        else
-            echo -e "  ${GRN}  ✓${NC} $PKG → ${GRN}OK${NC}"
-        fi
+	        heartbeat_file="${TMP_DIR}/heartbeat_${PKG}.dat"
+	        heartbeat_stale=false
+	        if [ "$bot_running" = "true" ]; then
+	            now=$(date +%s)
+	            check_interval=$(grep '^CHECK_INTERVAL=' "${PROJECT_DIR}/${CFG}" 2>/dev/null | cut -d= -f2 | tr -dc '0-9')
+	            stale_limit=$(grep '^HEARTBEAT_STALE_SECONDS=' "${PROJECT_DIR}/${CFG}" 2>/dev/null | cut -d= -f2 | tr -dc '0-9')
+	            [ -n "$check_interval" ] || check_interval=30
+	            [ -n "$stale_limit" ] || stale_limit=0
+	            if [ "$stale_limit" -le 0 ]; then
+	                stale_limit=$((check_interval * 3))
+	                [ "$stale_limit" -lt 45 ] && stale_limit=45
+	            fi
+	            hb_ts=$(grep '^timestamp=' "$heartbeat_file" 2>/dev/null | tail -n 1 | cut -d= -f2 | tr -dc '0-9')
+	            if [ -n "$hb_ts" ] && [ "$((now - hb_ts))" -gt "$stale_limit" ]; then
+	                heartbeat_stale=true
+	                echo -e "  ${RED}[WATCHDOG]${NC} Bot '${WIN}' heartbeat stale $((now - hb_ts))s > ${stale_limit}s; restart monitor only..."
+	            elif [ -z "$hb_ts" ]; then
+	                pane_age_ok=true
+	            fi
+	        fi
+
+	        if [ "$bot_running" = "false" ] || [ "$heartbeat_stale" = "true" ]; then
+	            if [ "$bot_running" = "false" ]; then
+	                echo -e "  ${RED}[WATCHDOG]${NC} Bot '${WIN}' không chạy! Đang khởi động lại..."
+	            fi
+	            if [ -z "$WIN_PANE" ]; then
+	                tmux new-window -t roblox-multi -n "$WIN" 2>/dev/null
+	                tmux set-window-option -t "roblox-multi:${WIN}" automatic-rename off 2>/dev/null
+	                tmux set-window-option -t "roblox-multi:${WIN}" remain-on-exit on 2>/dev/null
+	            fi
+	            tmux respawn-pane -k -t "roblox-multi:${WIN}" -c "$PROJECT_DIR" \
+	                "CONFIG_FILE=\"$CFG\" LOG_FILE=\"$LOG\" STATS_FILE=\"roblox_stats_${PKG}.dat\" bash auto_rejoin.sh --run" 2>/dev/null
+	            echo -e "  ${GRN}[WATCHDOG]${NC} Đã restart monitor cho: ${CYN}$PKG${NC} (không force-stop Roblox)"
+	        else
+	            echo -e "  ${GRN}  ✓${NC} $PKG → ${GRN}OK${NC}"
+	        fi
     done
 
     echo ""

@@ -27,6 +27,7 @@ reset_config_vars() {
     unset LOW_SERVER_PICK_RETRIES LOW_SERVER_PICK_RETRY_DELAY
     unset ALLOW_UNSCOPED_DEEPLINK ALLOW_HOME_FALLBACK
     unset WINDOW_MISSING_THRESHOLD WINDOW_REOPEN_ENABLED LOBBY_RETRY_LIMIT LOBBY_RETRY_DELAY
+    unset UNKNOWN_ACTIVE_WAKE_AFTER UNKNOWN_ACTIVE_WAKE_BACKOFF STALLED_ACTIVE_TIMEOUT HEARTBEAT_STALE_SECONDS
     unset ROBLOX_API_ENABLED ROBLOX_API_CONNECT_TIMEOUT ROBLOX_API_MAX_TIME ROBLOX_API_CACHE_ENABLED
     unset ROBLOX_API_BREAKER_LIMIT ROBLOX_API_BREAKER_COOLDOWN ROBLOX_USER_ID
     unset PRESENCE_ENABLED PRESENCE_INTERVAL AUTO_DISCOVER_UNIVERSE EXPECTED_UNIVERSE_ID
@@ -106,6 +107,10 @@ valid_config() {
         'ALLOW_HOME_FALLBACK=false' \
         'WINDOW_MISSING_THRESHOLD=5' \
         'WINDOW_REOPEN_ENABLED=true' \
+        'UNKNOWN_ACTIVE_WAKE_AFTER=45' \
+        'UNKNOWN_ACTIVE_WAKE_BACKOFF=30' \
+        'STALLED_ACTIVE_TIMEOUT=150' \
+        'HEARTBEAT_STALE_SECONDS=90' \
         'LOBBY_RETRY_LIMIT=4' \
         'LOBBY_RETRY_DELAY=5'
 
@@ -122,6 +127,10 @@ valid_config() {
     assert_eq "valid config home fallback" "false" "$ALLOW_HOME_FALLBACK"
     assert_eq "valid config window threshold" "5" "$WINDOW_MISSING_THRESHOLD"
     assert_eq "valid config window reopen" "true" "$WINDOW_REOPEN_ENABLED"
+    assert_eq "valid config unknown wake after" "45" "$UNKNOWN_ACTIVE_WAKE_AFTER"
+    assert_eq "valid config unknown wake backoff" "30" "$UNKNOWN_ACTIVE_WAKE_BACKOFF"
+    assert_eq "valid config stalled timeout" "150" "$STALLED_ACTIVE_TIMEOUT"
+    assert_eq "valid config heartbeat stale" "90" "$HEARTBEAT_STALE_SECONDS"
     assert_eq "valid config lobby retry limit" "4" "$LOBBY_RETRY_LIMIT"
     assert_eq "valid config lobby retry delay" "5" "$LOBBY_RETRY_DELAY"
 }
@@ -234,6 +243,10 @@ missing_config_uses_defaults() {
     assert_eq "default home fallback" "false" "$ALLOW_HOME_FALLBACK"
     assert_eq "default window threshold" "3" "$WINDOW_MISSING_THRESHOLD"
     assert_eq "default window reopen" "true" "$WINDOW_REOPEN_ENABLED"
+    assert_eq "default unknown wake after" "60" "$UNKNOWN_ACTIVE_WAKE_AFTER"
+    assert_eq "default unknown wake backoff" "60" "$UNKNOWN_ACTIVE_WAKE_BACKOFF"
+    assert_eq "default stalled timeout" "180" "$STALLED_ACTIVE_TIMEOUT"
+    assert_eq "default heartbeat stale" "0" "$HEARTBEAT_STALE_SECONDS"
     assert_eq "default lobby retry limit" "3" "$LOBBY_RETRY_LIMIT"
     assert_eq "default lobby retry delay" "3" "$LOBBY_RETRY_DELAY"
     assert_eq "default api enabled" "true" "$ROBLOX_API_ENABLED"
@@ -261,6 +274,10 @@ save_and_reload() {
     LOW_SERVER_STRICT=true
     LOW_SERVER_PICK_RETRIES=7
     LOW_SERVER_PICK_RETRY_DELAY=3
+    UNKNOWN_ACTIVE_WAKE_AFTER=50
+    UNKNOWN_ACTIVE_WAKE_BACKOFF=40
+    STALLED_ACTIVE_TIMEOUT=160
+    HEARTBEAT_STALE_SECONDS=95
     ALLOW_UNSCOPED_DEEPLINK=true
     ROBLOX_API_ENABLED=true
     ROBLOX_USER_ID=123456789
@@ -281,6 +298,10 @@ save_and_reload() {
     assert_eq "reload saved low strict" "true" "$LOW_SERVER_STRICT"
     assert_eq "reload saved low retries" "7" "$LOW_SERVER_PICK_RETRIES"
     assert_eq "reload saved low retry delay" "3" "$LOW_SERVER_PICK_RETRY_DELAY"
+    assert_eq "reload saved unknown wake after" "50" "$UNKNOWN_ACTIVE_WAKE_AFTER"
+    assert_eq "reload saved unknown wake backoff" "40" "$UNKNOWN_ACTIVE_WAKE_BACKOFF"
+    assert_eq "reload saved stalled timeout" "160" "$STALLED_ACTIVE_TIMEOUT"
+    assert_eq "reload saved heartbeat stale" "95" "$HEARTBEAT_STALE_SECONDS"
     assert_eq "reload saved unscoped fallback" "true" "$ALLOW_UNSCOPED_DEEPLINK"
     assert_eq "reload saved user id" "123456789" "$ROBLOX_USER_ID"
     assert_eq "reload saved presence enabled" "true" "$PRESENCE_ENABLED"
