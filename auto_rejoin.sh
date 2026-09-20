@@ -822,6 +822,7 @@ launch_roblox() {
     log_msg "${YLW}[LAUNCH]${NC} Khởi động Roblox ${CYN}($pkg)${NC}..."
     local link=""
     local launch_success=false
+    local low_server_waiting_unique=false
     if [ -n "$PRIVATE_CODE" ]; then
         link="$(roblox_build_private_server_uri "$PRIVATE_CODE")" || {
             log_msg "${RED}[LAUNCH]${NC} Private server code không hợp lệ."
@@ -865,11 +866,9 @@ launch_roblox() {
                     return 1
                 }
             else
-                log_msg "${YLW}[LOW_SERVER]${NC} Không có server 1 người trống; chuyển sang server thường để mở game ngay."
-                link="$(roblox_build_game_uri "$PLACE_ID")" || {
-                    log_msg "${RED}[LAUNCH]${NC} Place ID không hợp lệ."
-                    return 1
-                }
+                log_msg "${YLW}[LOW_SERVER]${NC} Chua co JobId rieng; mo cua so clone de cho va se retry, khong join server thuong."
+                log_event WARN low_server_waiting_unique "$LOG_FILE" package "$pkg" place_id "$PLACE_ID" min_players "$min_p" max_players "$max_p"
+                low_server_waiting_unique=true
             fi
         fi
     else
@@ -965,6 +964,27 @@ launch_roblox() {
         local bottom=$(( top + final_h ))
         freeform_args="--windowingMode 5 --launch-bounds $left $top $right $bottom"
         bounds_args=("$left" "$top" "$right" "$bottom")
+    fi
+
+    if [ "$low_server_waiting_unique" = "true" ]; then
+        ANDROID_EXECUTOR=direct android_start_activity "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_start_activity_for_user 0 "$pkg/.MainActivity" "${bounds_args[@]}" > /dev/null 2>&1 ||
+        android_monkey_package "$pkg" > /dev/null 2>&1
+        local home_ret=$?
+        if [ $home_ret -ne 0 ]; then
+            log_msg "${RED}[LOW_SERVER]${NC} Chua co JobId rieng va khong mo duoc cua so cho $pkg."
+            log_event WARN low_server_wait_window_failed "$LOG_FILE" package "$pkg" place_id "$PLACE_ID"
+            return 1
+        fi
+        LAST_RESTART=$(date +%s)
+        LAST_AFK_TAP=$(date +%s)
+        LAST_LAUNCH=$(date +%s)
+        LOADING_STARTED_AT=$(date +%s)
+        WINDOW_MISSING_COUNT=0
+        TAP_ON_LOAD_DONE=false
+        log_msg "${YLW}[LOW_SERVER]${NC} Da mo cua so clone de cho JobId rieng; khong join server thuong."
+        log_event WARN low_server_waiting_for_unique_server "$LOG_FILE" package "$pkg" place_id "$PLACE_ID"
+        return 0
     fi
 
     # 1. Thử mở bằng executor hệ thống (su / adb / direct) với user 0
