@@ -60,6 +60,7 @@ export function loadEnv() {
   return {
     nodeEnv,
     port: intEnv("PORT", 3000),
+    internalApiKey: process.env.INTERNAL_API_KEY || "",
     db: {
       host: process.env.DB_HOST || "127.0.0.1",
       port: intEnv("DB_PORT", 3306),

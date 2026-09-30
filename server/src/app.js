@@ -38,6 +38,7 @@ import { createCustomerAuthMiddleware } from "./middleware/customer-auth.middlew
 import { createCustomerRateLimits } from "./middleware/customer-rate-limit.middleware.js";
 import { createUserAuthRouter } from "./routes/user-auth.routes.js";
 import { createWalletRouter } from "./routes/wallet.routes.js";
+import { createInternalRouter } from "./routes/internal.routes.js";
 import { errorMiddleware, notFoundMiddleware } from "./middleware/error.middleware.js";
 import { isoNow } from "./utils/time.js";
 
@@ -178,6 +179,9 @@ export function createApp({
       rateLimits: admRateLimits
     })
   );
+
+  // Internal M2M Integration Router (Shop -> Tool Server)
+  app.use("/api/v1/internal", createInternalRouter({ licenseRepository: licRepo, config }));
 
   // Static Frontend Serving (if admin/dist exists)
   const distPath = path.resolve(process.cwd(), "admin/dist");

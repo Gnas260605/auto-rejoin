@@ -373,7 +373,7 @@ export function CreateLicenseModal({ isOpen, onClose, onCreated, plans = [] }) {
                     type="text"
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}
-                    placeholder="https://your-tunnel.trycloudflare.com hoặc http://ip:3000"
+                    placeholder="https://tool.taphoasandg.com"
                     className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-xs font-mono focus:border-cyan-500 focus:outline-none"
                   />
                 </div>

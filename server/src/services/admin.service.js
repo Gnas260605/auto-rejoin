@@ -85,7 +85,7 @@ function formatExpiryText({ expiresAt, expiresInHours, expiresInDays }) {
 }
 
 function buildAllInOneCommand({ domain, placeId, rawKey, antiAfk = false, joinLowServer = true, minPlayers = 0, maxPlayers = 2 }) {
-  const apiBase = String(domain || "http://localhost:3000").replace(/\/$/, "");
+  const apiBase = String(domain || "https://tool.taphoasandg.com").replace(/\/$/, "");
   const targetPlaceId = String(placeId || "107778070777162").trim();
   const antiAfkParam = antiAfk ? "ANTI_AFK=true " : "ANTI_AFK=false ";
   const lowServerParam = joinLowServer !== false
