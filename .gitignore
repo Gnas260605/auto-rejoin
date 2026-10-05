@@ -13,3 +13,6 @@ keys/private/
 release/private/
 release/
 .agents/
+
+# Binary tunnel chạy trên máy dev, không đưa vào repo (51 MB)
+cloudflared*
