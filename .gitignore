@@ -16,3 +16,9 @@ release/
 
 # Binary tunnel chạy trên máy dev, không đưa vào repo (51 MB)
 cloudflared*
+
+# Config máy cày: chứa token kết nối Shop, webhook Discord
+shop_worker.cfg
+config.cfg
+config_*.cfg
+*.cfg.backup.*

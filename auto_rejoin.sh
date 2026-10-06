@@ -115,6 +115,13 @@ fi
 # shellcheck source=lib/monitor.sh
 source "$MONITOR_LIB"
 
+# Kết nối ShopRoblox (cày thuê). Bản cài cũ chưa có file này vẫn chạy bình thường.
+WORKER_LIB="${SCRIPT_DIR}/lib/worker.sh"
+if [ -f "$WORKER_LIB" ]; then
+    # shellcheck source=lib/worker.sh
+    source "$WORKER_LIB"
+fi
+
 # ── Biến toàn cục cho bot loop ──────────────────────────
 LAST_RESTART=0
 LAST_AFK_TAP=0

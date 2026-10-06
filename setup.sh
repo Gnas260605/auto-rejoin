@@ -56,7 +56,7 @@ bootstrap_download() {
 # Production: ghim về tag cố định, ví dụ AUTO_REJOIN_REF=v4.5.0 bash setup.sh <PLACE_ID>.
 AUTO_REJOIN_REPO="${AUTO_REJOIN_REPO:-Gnas260605/auto-rejoin}"
 AUTO_REJOIN_REF="${AUTO_REJOIN_REF:-main}"
-SETUP_LIB_FILES=(config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh)
+SETUP_LIB_FILES=(config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh worker.sh)
 
 setup_install_files() {
     local f
@@ -276,6 +276,36 @@ if [ -n "$SETUP_LICENSE_KEY" ]; then
     fi
 fi
 
+# Kết nối ShopRoblox (Tab cày thuê) trong cùng lệnh cài: SHOP_API_URL + SHOP_WORKER_TOKEN [+ WORKER_ID]
+# → ghi shop_worker.cfg (600), dùng chung cho mọi tab. Không truyền thì giữ nguyên file cũ (nếu có).
+SETUP_SHOP_API_URL="${AUTO_REJOIN_SHOP_API_URL:-${SHOP_API_URL:-}}"
+SETUP_SHOP_WORKER_TOKEN="${AUTO_REJOIN_SHOP_WORKER_TOKEN:-${SHOP_WORKER_TOKEN:-}}"
+SETUP_WORKER_ID="${AUTO_REJOIN_WORKER_ID:-${WORKER_ID:-}}"
+if [ -n "$SETUP_SHOP_API_URL" ] || [ -n "$SETUP_SHOP_WORKER_TOKEN" ]; then
+    SETUP_SHOP_API_URL="${SETUP_SHOP_API_URL%/}"
+    if [[ ! "$SETUP_SHOP_API_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+        echo -e "  ${RED}x SHOP_API_URL phải dạng https://ten-mien (vd. https://taphoasandg.com). Bỏ qua kết nối Shop.${NC}"
+    elif [[ ! "$SETUP_SHOP_WORKER_TOKEN" =~ ^[A-Za-z0-9._~-]{16,200}$ ]]; then
+        echo -e "  ${RED}x SHOP_WORKER_TOKEN không hợp lệ (lấy ở Admin › Tab cày thuê). Bỏ qua kết nối Shop.${NC}"
+    else
+        if [ -n "$SETUP_WORKER_ID" ] && [[ ! "$SETUP_WORKER_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
+            echo -e "  ${YLW}⚠ WORKER_ID không hợp lệ, dùng tên máy mặc định${NC}"
+            SETUP_WORKER_ID=""
+        fi
+        (
+            umask 077
+            {
+                printf '# Tạo bởi setup.sh — kết nối ShopRoblox (Tab cày thuê). Chứa token: không chia sẻ file này.\n'
+                printf 'SHOP_API_URL="%s"\n' "$SETUP_SHOP_API_URL"
+                printf 'SHOP_WORKER_TOKEN="%s"\n' "$SETUP_SHOP_WORKER_TOKEN"
+                [ -n "$SETUP_WORKER_ID" ] && printf 'WORKER_ID="%s"\n' "$SETUP_WORKER_ID"
+            } > "${SCRIPT_DIR}/shop_worker.cfg"
+        )
+        chmod 600 "${SCRIPT_DIR}/shop_worker.cfg" 2>/dev/null
+        echo -e "  ${BGRN}✓ Đã kết nối Shop (${SETUP_SHOP_API_URL}) — máy: ${SETUP_WORKER_ID:-tự đặt}${NC}"
+    fi
+fi
+
 # ── BƯỚC 3/4: Phát hiện executor ──────────────────────────
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║  [BƯỚC 3/4] Phát hiện phương thức hệ thống      ║${NC}"
@@ -424,8 +454,11 @@ for PKG in $PACKAGES; do
     EXISTING_LOW_PICK_RETRY_DELAY=""
     EXISTING_ALLOW_UNSCOPED=""
     EXISTING_ALLOW_HOME=""
+    # Khoá kết nối ShopRoblox riêng của tab (ORDER_ID, ghi đè token...): giữ nguyên khi ghi lại config.
+    EXISTING_SHOP_LINES=""
 
     if [ -f "$CFG" ]; then
+        EXISTING_SHOP_LINES=$(grep -E '^(SHOP_API_URL|SHOP_WORKER_TOKEN|WORKER_ID|ORDER_ID|WORKER_HEARTBEAT_INTERVAL|ORDER_DONE_ACTION)=' "$CFG" 2>/dev/null | tr -d '\r')
         EXISTING_PLACE_ID=$(grep '^PLACE_ID=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_PRIVATE_CODE=$(grep '^PRIVATE_CODE=' "$CFG" | cut -d'=' -f2 | tr -d '"\r' 2>/dev/null)
         EXISTING_USERNAME=$(grep '^ROBLOX_USERNAME=' "$CFG" | cut -d'"' -f2 2>/dev/null)
@@ -521,6 +554,10 @@ ALLOW_UNSCOPED_DEEPLINK=$ALLOW_UNSCOPED_DEEPLINK
 ALLOW_HOME_FALLBACK=$ALLOW_HOME_FALLBACK
 EXECUTOR="$EXECUTOR_TYPE"
 EOF
+    if [ -n "$EXISTING_SHOP_LINES" ]; then
+        printf '%s\n' "$EXISTING_SHOP_LINES" >> "$CFG"
+        chmod 600 "$CFG" 2>/dev/null
+    fi
 
     progress_bar $COUNT $TOTAL "Khởi động acc $COUNT/$TOTAL..."
 

@@ -13,7 +13,7 @@ pass() { PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS %s\n' "$1"; }
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL %s\n' "$1"; }
 assert_eq() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1 expected=[$2] actual=[$3]"; fi; }
 
-LIBS="config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh"
+LIBS="config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh worker.sh"
 
 # Ghi 1 bộ cài hoàn chỉnh vào $1, đánh dấu bằng $2 (OLD/NEW).
 write_install() {
@@ -77,7 +77,7 @@ marks() {
 setup_case
 write_install "$TEST_TMP/app" OLD
 run_setup env
-assert_eq "A tat ca file duoc cap nhat" "NEW=22 " "$(marks)"
+assert_eq "A tat ca file duoc cap nhat" "NEW=23 " "$(marks)"
 assert_eq "A VERSION theo snapshot" "9.9.9" "$(tr -d '\r\n' < "$TEST_TMP/app/VERSION")"
 unpinned="$(grep raw.githubusercontent "$TEST_TMP/curl.log" | grep -vc "/${FAKE_SHA}/")"
 assert_eq "A moi URL ghim ve commit SHA" "0" "$unpinned"
@@ -88,7 +88,7 @@ setup_case
 write_install "$TEST_TMP/app" OLD
 rm -f "$TEST_TMP/remote/lib/monitor.sh"
 run_setup env; status=$?
-assert_eq "B giu nguyen toan bo ban cu" "OLD=22 " "$(marks)"
+assert_eq "B giu nguyen toan bo ban cu" "OLD=23 " "$(marks)"
 assert_eq "B setup van thanh cong voi ban local" "0" "$status"
 
 # C. File tải về hỏng (vd trang lỗi HTML): huỷ cập nhật.
@@ -96,7 +96,7 @@ setup_case
 write_install "$TEST_TMP/app" OLD
 printf '<html><body>rate limited (</body></html>\n' > "$TEST_TMP/remote/lib/runtime.sh"
 run_setup env
-assert_eq "C file hong -> giu ban cu" "OLD=22 " "$(marks)"
+assert_eq "C file hong -> giu ban cu" "OLD=23 " "$(marks)"
 
 # D. Chưa có bản cài + không tải được: dừng với mã lỗi.
 setup_case
@@ -108,7 +108,7 @@ run_setup env; status=$?
 setup_case
 write_install "$TEST_TMP/app" OLD
 run_setup env FAKE_API_DOWN=true AUTO_REJOIN_REF=v1.2.3
-assert_eq "E API loi van cai duoc" "NEW=22 " "$(marks)"
+assert_eq "E API loi van cai duoc" "NEW=23 " "$(marks)"
 assert_eq "E dung ref goc" "0" "$(grep raw.githubusercontent "$TEST_TMP/curl.log" | grep -vc '/v1.2.3/')"
 
 # F. Remote trả CRLF: được chuẩn hoá về LF trước khi cài.

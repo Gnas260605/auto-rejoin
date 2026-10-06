@@ -66,11 +66,18 @@ config_init_defaults() {
     TRANSIT_TIMEOUT="${TRANSIT_TIMEOUT:-45}"
     LOW_SERVER_MAX_PAGES="${LOW_SERVER_MAX_PAGES:-5}"
     FAILED_JOB_TTL="${FAILED_JOB_TTL:-300}"
+    # Kết nối ShopRoblox (cày thuê): bỏ trống SHOP_API_URL/SHOP_WORKER_TOKEN = tắt, tool chạy như cũ.
+    SHOP_API_URL="${SHOP_API_URL:-}"
+    SHOP_WORKER_TOKEN="${SHOP_WORKER_TOKEN:-}"
+    WORKER_ID="${WORKER_ID:-}"
+    ORDER_ID="${ORDER_ID:-}"
+    WORKER_HEARTBEAT_INTERVAL="${WORKER_HEARTBEAT_INTERVAL:-30}"
+    ORDER_DONE_ACTION="${ORDER_DONE_ACTION:-logout}"
 }
 
 config_is_allowed_key() {
     case "$1" in
-        PLACE_ID|PRIVATE_CODE|ROBLOX_PACKAGE|CHECK_INTERVAL|AUTO_RESTART_PERIOD|ANTI_AFK|AFK_TAP_INTERVAL|TAP_X|TAP_Y|DISCORD_WEBHOOK|ROBLOX_USERNAME|PROFILE|FREEFORM_LAYOUT|FREEFORM_WIDTH|FREEFORM_HEIGHT|FREEFORM_OFFSET_X|FREEFORM_OFFSET_Y|LICENSE_MODE|LICENSE_API|JOIN_LOW_SERVER|LOW_SERVER_MIN_PLAYERS|LOW_SERVER_MAX_PLAYERS|LOW_SERVER_STRICT|LOW_SERVER_PICK_RETRIES|LOW_SERVER_PICK_RETRY_DELAY|ALLOW_UNSCOPED_DEEPLINK|ALLOW_HOME_FALLBACK|WINDOW_MISSING_THRESHOLD|WINDOW_REOPEN_ENABLED|UNKNOWN_ACTIVE_WAKE_AFTER|UNKNOWN_ACTIVE_WAKE_BACKOFF|STALLED_ACTIVE_TIMEOUT|HEARTBEAT_STALE_SECONDS|LOBBY_RETRY_LIMIT|LOBBY_RETRY_DELAY|ROBLOX_API_ENABLED|ROBLOX_API_CONNECT_TIMEOUT|ROBLOX_API_MAX_TIME|ROBLOX_API_CACHE_ENABLED|ROBLOX_API_BREAKER_LIMIT|ROBLOX_API_BREAKER_COOLDOWN|ROBLOX_USER_ID|PRESENCE_ENABLED|PRESENCE_INTERVAL|AUTO_DISCOVER_UNIVERSE|EXPECTED_UNIVERSE_ID|ALLOWED_GAME_PLACE_IDS|TRANSIT_TIMEOUT|LOW_SERVER_MAX_PAGES|FAILED_JOB_TTL)
+        PLACE_ID|PRIVATE_CODE|ROBLOX_PACKAGE|CHECK_INTERVAL|AUTO_RESTART_PERIOD|ANTI_AFK|AFK_TAP_INTERVAL|TAP_X|TAP_Y|DISCORD_WEBHOOK|ROBLOX_USERNAME|PROFILE|FREEFORM_LAYOUT|FREEFORM_WIDTH|FREEFORM_HEIGHT|FREEFORM_OFFSET_X|FREEFORM_OFFSET_Y|LICENSE_MODE|LICENSE_API|JOIN_LOW_SERVER|LOW_SERVER_MIN_PLAYERS|LOW_SERVER_MAX_PLAYERS|LOW_SERVER_STRICT|LOW_SERVER_PICK_RETRIES|LOW_SERVER_PICK_RETRY_DELAY|ALLOW_UNSCOPED_DEEPLINK|ALLOW_HOME_FALLBACK|WINDOW_MISSING_THRESHOLD|WINDOW_REOPEN_ENABLED|UNKNOWN_ACTIVE_WAKE_AFTER|UNKNOWN_ACTIVE_WAKE_BACKOFF|STALLED_ACTIVE_TIMEOUT|HEARTBEAT_STALE_SECONDS|LOBBY_RETRY_LIMIT|LOBBY_RETRY_DELAY|ROBLOX_API_ENABLED|ROBLOX_API_CONNECT_TIMEOUT|ROBLOX_API_MAX_TIME|ROBLOX_API_CACHE_ENABLED|ROBLOX_API_BREAKER_LIMIT|ROBLOX_API_BREAKER_COOLDOWN|ROBLOX_USER_ID|PRESENCE_ENABLED|PRESENCE_INTERVAL|AUTO_DISCOVER_UNIVERSE|EXPECTED_UNIVERSE_ID|ALLOWED_GAME_PLACE_IDS|TRANSIT_TIMEOUT|LOW_SERVER_MAX_PAGES|FAILED_JOB_TTL|SHOP_API_URL|SHOP_WORKER_TOKEN|WORKER_ID|ORDER_ID|WORKER_HEARTBEAT_INTERVAL|ORDER_DONE_ACTION)
             return 0
             ;;
         *)
@@ -227,6 +234,39 @@ config_validate_package() {
     return 1
 }
 
+# SHOP_API_URL phải là https (hoặc http://localhost / 127.0.0.1 khi thử nghiệm), không có ký tự shell.
+config_validate_shop_worker() {
+    local status=0
+    if [ -n "$SHOP_API_URL" ]; then
+        if [[ ! "$SHOP_API_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$ ]] \
+            && [[ ! "$SHOP_API_URL" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/[A-Za-z0-9._/-]*)?$ ]]; then
+            config_warn "Invalid SHOP_API_URL; Shop connection disabled"
+            SHOP_API_URL=""
+            status=1
+        fi
+        SHOP_API_URL="${SHOP_API_URL%/}"
+    fi
+    if [ -n "$SHOP_WORKER_TOKEN" ] && [[ ! "$SHOP_WORKER_TOKEN" =~ ^[A-Za-z0-9._~-]{16,200}$ ]]; then
+        config_warn "Invalid SHOP_WORKER_TOKEN; Shop connection disabled"
+        SHOP_WORKER_TOKEN=""
+        status=1
+    fi
+    if [ -n "$WORKER_ID" ] && [[ ! "$WORKER_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
+        config_warn "Invalid WORKER_ID; using device default"
+        WORKER_ID=""
+        status=1
+    fi
+    case "$ORDER_DONE_ACTION" in
+        logout|stop) ;;
+        *)
+            config_warn "Invalid ORDER_DONE_ACTION; using logout"
+            ORDER_DONE_ACTION="logout"
+            status=1
+            ;;
+    esac
+    return "$status"
+}
+
 config_validate_license_mode() {
     case "$LICENSE_MODE" in
         disabled|optional|required)
@@ -299,6 +339,9 @@ config_validate() {
     config_validate_uint TRANSIT_TIMEOUT 45 5 600 || status=1
     config_validate_uint LOW_SERVER_MAX_PAGES 5 1 20 || status=1
     config_validate_uint FAILED_JOB_TTL 300 10 86400 || status=1
+    config_validate_optional_uint ORDER_ID "" 1 999999999999 || status=1
+    config_validate_uint WORKER_HEARTBEAT_INTERVAL 30 10 3600 || status=1
+    config_validate_shop_worker || status=1
 
     return "$status"
 }
@@ -412,11 +455,19 @@ config_save() {
         config_write_raw TRANSIT_TIMEOUT
         config_write_raw LOW_SERVER_MAX_PAGES
         config_write_raw FAILED_JOB_TTL
+        config_write_quoted SHOP_API_URL
+        config_write_quoted SHOP_WORKER_TOKEN
+        config_write_quoted WORKER_ID
+        config_write_quoted ORDER_ID
+        config_write_raw WORKER_HEARTBEAT_INTERVAL
+        config_write_raw ORDER_DONE_ACTION
     } > "$tmp" || {
         rm -f "$tmp"
         return 1
     }
 
+    # File có token kết nối Shop: chỉ chủ máy đọc được.
+    [ -n "$SHOP_WORKER_TOKEN" ] && chmod 600 "$tmp" 2>/dev/null
     mv "$tmp" "$file"
 }
 

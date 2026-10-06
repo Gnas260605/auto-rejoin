@@ -12,6 +12,8 @@ MONITOR_STATE_OFFLINE="OFFLINE"
 MONITOR_STATE_UNKNOWN_ACTIVE="UNKNOWN_ACTIVE"
 MONITOR_STATE_STALLED_ACTIVE="STALLED_ACTIVE"
 MONITOR_STATE_ERROR="ERROR"
+# Đơn cày thuê của tab đã xong (lib/worker.sh): không rejoin, chỉ chờ Shop gán đơn mới (RESUME).
+MONITOR_STATE_ORDER_DONE="ORDER_DONE"
 
 MONITOR_STATE="${MONITOR_STATE:-$MONITOR_STATE_STOPPED}"
 MONITOR_PREVIOUS_STATE="${MONITOR_PREVIOUS_STATE:-}"
@@ -44,6 +46,9 @@ WRONG_PLACE_STREAK="${WRONG_PLACE_STREAK:-0}"
 WRONG_PLACE_NOTIFIED="${WRONG_PLACE_NOTIFIED:-false}"
 WRONG_PLACE_OBSERVED="${WRONG_PLACE_OBSERVED:-}"
 WRONG_PLACE_LAST_VERDICT="${WRONG_PLACE_LAST_VERDICT:-}"
+UNKNOWN_ACTIVE_LAST_OBSERVE_LOG_AT="${UNKNOWN_ACTIVE_LAST_OBSERVE_LOG_AT:-0}"
+UNKNOWN_ACTIVE_OBSERVE_LOG_EVERY="${UNKNOWN_ACTIVE_OBSERVE_LOG_EVERY:-300}"
+MONITOR_TICK_JITTER="${MONITOR_TICK_JITTER:-0}"
 
 monitor_now() {
     if [ -n "${MONITOR_NOW:-}" ]; then
@@ -60,6 +65,13 @@ monitor_sleep() {
     else
         sleep "$seconds"
     fi
+}
+
+# Lệch 0-4 giây cố định theo package: nhiều tab chạy song song không cùng lúc gọi dumpsys/đọc log.
+monitor_tick_jitter() {
+    local package="${1:-$ROBLOX_PACKAGE}" sum
+    sum="$(printf '%s' "$package" | cksum 2>/dev/null | cut -d' ' -f1)"
+    printf '%s\n' "$(( ${sum:-0} % 5 ))"
 }
 
 monitor_get_state() {
@@ -795,7 +807,9 @@ monitor_tick() {
                     else
                         log_event WARN startup_non_destructive_wake_failed "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "unknown_active_timeout"
                     fi
-                else
+                elif [ $((now - UNKNOWN_ACTIVE_LAST_OBSERVE_LOG_AT)) -ge "$UNKNOWN_ACTIVE_OBSERVE_LOG_EVERY" ]; then
+                    # Ghi mỗi UNKNOWN_ACTIVE_OBSERVE_LOG_EVERY giây thay vì mỗi tick (log nhiều tab rất nhanh đầy).
+                    UNKNOWN_ACTIVE_LAST_OBSERVE_LOG_AT="$now"
                     log_event INFO unknown_active_observe "$LOG_FILE" package "$ROBLOX_PACKAGE" last_in_game "${LAST_IN_GAME:-0}" age "$unknown_age"
                 fi
             fi
@@ -809,6 +823,9 @@ monitor_tick() {
                 send_discord "⚠️ **[$ROBLOX_PACKAGE]** Monitor gặp lỗi lặp lại ${MONITOR_ERROR_COUNT} lần (${MONITOR_REASON}). Kiểm tra log."
             fi
             monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "error_recovered"
+            ;;
+        "$MONITOR_STATE_ORDER_DONE")
+            # Đơn đã xong: đứng yên, không mở lại game. Thoát trạng thái này chỉ qua worker_handle_action (RESUME).
             ;;
         "$MONITOR_STATE_STALLED_ACTIVE")
             if ! is_roblox_running; then
@@ -832,6 +849,9 @@ monitor_tick() {
 
 monitor_run() {
     load_config
+    if declare -F worker_load_shared_config >/dev/null 2>&1; then
+        worker_load_shared_config
+    fi
     init_executor
     local win_name="${ROBLOX_PACKAGE//./_}"
     local pid_file="${TMP_DIR}/roblox_bot_${win_name}.pid"
@@ -859,6 +879,8 @@ monitor_run() {
     MONITOR_ERROR_COUNT=0
     WRONG_PLACE_STREAK=0
     WRONG_PLACE_NOTIFIED=false
+    UNKNOWN_ACTIVE_LAST_OBSERVE_LOG_AT=0
+    MONITOR_TICK_JITTER="$(monitor_tick_jitter "$ROBLOX_PACKAGE")"
 
     clear
     echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"
@@ -876,9 +898,13 @@ monitor_run() {
         local tick_start tick_end
         tick_start="$(monitor_now)"
         MONITOR_LOOP_ITERATION=$((MONITOR_LOOP_ITERATION + 1))
+        # Lệnh từ Shop / file trigger xử lý trước tick để đơn đã xong không bị rejoin thêm lần nào.
+        if declare -F worker_tick >/dev/null 2>&1; then
+            worker_tick
+        fi
         monitor_tick || monitor_transition "$MONITOR_STATE_ERROR" "tick_failed"
         tick_end="$(monitor_now)"
         monitor_write_heartbeat "$((tick_end - tick_start))"
-        monitor_sleep "$CHECK_INTERVAL"
+        monitor_sleep "$((CHECK_INTERVAL + MONITOR_TICK_JITTER))"
     done
 }

@@ -49,7 +49,7 @@ android_list_packages() {
 EOF
 printf '#!/usr/bin/env bash\n' > "${TEST_TMP}/lib/network.sh"
 printf '#!/usr/bin/env bash\n' > "${TEST_TMP}/lib/license.sh"
-for lib_file in config.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh entitlement.sh updater.sh cookie.sh delta.sh; do
+for lib_file in config.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh entitlement.sh updater.sh cookie.sh delta.sh worker.sh; do
     printf '#!/usr/bin/env bash\n' > "${TEST_TMP}/lib/${lib_file}"
 done
 printf '#!/usr/bin/env bash\nexit 0\n' > "${TEST_TMP}/bin/roblox-manager"
@@ -116,6 +116,42 @@ assert_file_contains "explicit override keeps low server disabled" "${TEST_TMP}/
 status=$?
 assert_status "setup explicit strict override succeeds" 0 "$status"
 assert_file_contains "explicit strict override respected" "${TEST_TMP}/config_com.roblox.client.cfg" "LOW_SERVER_STRICT=true"
+
+# Chạy lại setup không được xoá khoá kết nối ShopRoblox của tab (ORDER_ID, token riêng).
+printf 'ORDER_ID="42"\nSHOP_WORKER_TOKEN="tab-token-1234567890"\n' >> "${TEST_TMP}/config_com.roblox.client.cfg"
+(
+    cd "$TEST_TMP" || exit 1
+    PATH="./fakebin:${PATH}" AUTO_REJOIN_PARENT=true bash setup.sh 123456 >/dev/null 2>&1
+)
+status=$?
+assert_status "setup rerun with shop keys succeeds" 0 "$status"
+assert_file_contains "setup keeps ORDER_ID" "${TEST_TMP}/config_com.roblox.client.cfg" 'ORDER_ID="42"'
+assert_file_contains "setup keeps per-tab token" "${TEST_TMP}/config_com.roblox.client.cfg" 'SHOP_WORKER_TOKEN="tab-token-1234567890"'
+
+# Lệnh cài all-in-one kèm kết nối Shop → shop_worker.cfg
+(
+    cd "$TEST_TMP" || exit 1
+    rm -f shop_worker.cfg
+    PATH="./fakebin:${PATH}" AUTO_REJOIN_PARENT=true SHOP_API_URL="https://taphoasandg.com/" \
+        SHOP_WORKER_TOKEN="shop-token-abcdefghijkl" WORKER_ID="ugphone-01" bash setup.sh 123456 >/dev/null 2>&1
+)
+status=$?
+assert_status "setup with shop connection succeeds" 0 "$status"
+assert_file_contains "shop_worker.cfg has url" "${TEST_TMP}/shop_worker.cfg" 'SHOP_API_URL="https://taphoasandg.com"'
+assert_file_contains "shop_worker.cfg has token" "${TEST_TMP}/shop_worker.cfg" 'SHOP_WORKER_TOKEN="shop-token-abcdefghijkl"'
+assert_file_contains "shop_worker.cfg has worker id" "${TEST_TMP}/shop_worker.cfg" 'WORKER_ID="ugphone-01"'
+
+(
+    cd "$TEST_TMP" || exit 1
+    rm -f shop_worker.cfg
+    PATH="./fakebin:${PATH}" AUTO_REJOIN_PARENT=true SHOP_API_URL="http://evil.example.com" \
+        SHOP_WORKER_TOKEN="shop-token-abcdefghijkl" bash setup.sh 123456 >/dev/null 2>&1
+)
+if [ -f "${TEST_TMP}/shop_worker.cfg" ]; then
+    FAIL_COUNT=$((FAIL_COUNT + 1)); echo "FAIL insecure shop url must not be saved"
+else
+    PASS_COUNT=$((PASS_COUNT + 1)); echo "PASS insecure shop url rejected"
+fi
 
 echo ""
 echo "Setup Low Server Default Tests: PASS=$PASS_COUNT, FAIL=$FAIL_COUNT"

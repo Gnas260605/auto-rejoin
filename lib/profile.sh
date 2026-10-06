@@ -79,6 +79,7 @@ profile_show() {
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
             DISCORD_WEBHOOK=*) printf 'DISCORD_WEBHOOK="***"\n' ;;
+            SHOP_WORKER_TOKEN=*) printf 'SHOP_WORKER_TOKEN="***"\n' ;;
             *ROBLOSECURITY*|*PASSWORD*|*COOKIE*) ;;
             *) printf '%s\n' "$line" ;;
         esac

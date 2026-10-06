@@ -18,6 +18,7 @@ Trả lời người dùng bằng tiếng Việt. Giữ nguyên tên hàm, biế
 | `lib/runtime.sh` | Lock theo package, backoff, cooldown khi lỗi liên tiếp. |
 | `lib/roblox.sh`, `lib/roblox_api.sh` | Deep-link, chọn server ít người (low-server). |
 | `lib/license.sh`, `lib/entitlement.sh` | License client, giới hạn tính năng theo gói. |
+| `lib/worker.sh` | Kết nối ShopRoblox cày thuê: heartbeat, `check_order_status`, dừng + đăng xuất khi đơn xong. |
 | `lib/updater.sh` | Update có ký số (manifest + SHA256 + rollback). |
 | `bin/roblox-manager` | CLI: `doctor`, `setup`, `update`, `license`, `self-test`... |
 | `setup.sh` | Script cài đặt cho khách (tải file từ GitHub). |
@@ -52,6 +53,17 @@ Nguyên tắc: **không đủ bằng chứng thì giữ nguyên process Roblox.*
 - Không restart định kỳ khi đang `IN_GAME` (`AUTO_RESTART_PERIOD` chỉ được log, không được kill).
 - Mất mạng, mất focus cửa sổ, Roblox API 429, timeout → chuyển `UNKNOWN_ACTIVE` và quan sát, không kill.
 - Kiểm tra sau khi sửa: `grep -rn "android_force_stop\|force-stop" lib auto_rejoin.sh bin`.
+
+Kết nối ShopRoblox (`lib/worker.sh`, hướng dẫn: `HUONG_DAN_KET_NOI_SHOP.md`):
+
+- Đơn xong → `worker_finish_order`: state `ORDER_DONE` (không rejoin; `monitor_tick` không làm gì) →
+  `monitor_force_stop_package ... "manual"` (lệnh chủ động từ Shop/thợ) → `worker_clear_app_data` (`pm clear`).
+- `pm clear` chỉ được gọi qua `worker_clear_app_data`: validate package + bắt buộc tên có `roblox`.
+- Chỉ thoát `ORDER_DONE` bằng lệnh `RESUME` từ Shop (thợ gán đơn mới).
+- Sau khi trả acc phải xoá `ORDER_ID` khỏi config (`worker_forget_order_in_config`); Shop cũng bỏ qua mã đơn đã xong
+  bot tự báo. Nếu không, restart bot sau khi đăng nhập acc khách mới sẽ đăng xuất nhầm acc mới.
+- Lỗi mạng / Shop không trả lời → không làm gì (cày tiếp). Không bao giờ dừng game vì không liên lạc được Shop.
+- Token Shop chỉ đi qua stdin của curl (`-H @-`), không trên dòng lệnh, không vào log/Discord.
 
 Tính năng **cố ý tắt**, không được bật lại: inject cookie đăng nhập, export `.ROBLOSECURITY`,
 giải/bypass reCAPTCHA, bypass key Delta/X. Không lưu raw license key, mật khẩu hay cookie.
