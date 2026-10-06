@@ -17,6 +17,12 @@ curl -sSL https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/setup.sh
 
 *(Nếu bạn đã tải file `setup.sh` về máy, bạn có thể chạy trực tiếp bằng lệnh: `chmod +x setup.sh && ./setup.sh <PLACE_ID> [PRIVATE_CODE]`)*
 
+*Cài đúng một phiên bản cố định (khuyên dùng khi đã có tag release):*
+```bash
+AUTO_REJOIN_REF=v4.5.0 bash setup.sh 2753915549
+```
+*Setup tải toàn bộ file của cùng một commit vào thư mục tạm, chỉ thay bản đang chạy khi tải đủ và hợp lệ. Mất mạng giữa chừng thì giữ nguyên bản cũ.*
+
 ---
 
 ## 🛠️ Các tính năng nổi bật

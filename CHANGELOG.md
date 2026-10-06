@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Security (license server)
+- `POST /api/v1/payments/webhook` (SePay/Casso) bắt buộc `PAYMENT_WEBHOOK_SECRET` (header `Authorization: Apikey|Bearer`, `secure-token` hoặc `x-webhook-secret`, so sánh timing-safe). Trước đây không xác thực: ai cũng tự "thanh toán" đơn để nhận license. Thiếu secret ở production -> 503.
+- Token admin có `type: "admin_access"` và middleware admin bắt buộc kiểm tra; token khách hàng bắt buộc `type: "customer_access"`. Trước đây `CUSTOMER_JWT_SECRET` mặc định trùng secret admin nên token khách hàng dùng được ở `/api/v1/admin/*` (leo quyền khi id trùng). **Admin phải đăng nhập lại sau khi deploy.**
+- Production bắt buộc `CUSTOMER_JWT_SECRET` đặt riêng và khác `ADMIN_JWT_SECRET`.
+- `GET /payments/:code/status` chỉ trả license key khi có `X-Payment-Token` của người tạo đơn; `POST /payments/:code/cancel` công khai bắt buộc token (trước đây huỷ được đơn bất kỳ theo id số).
+- So sánh `INTERNAL_API_KEY` timing-safe. `verify:prod` kiểm tra thêm `CUSTOMER_JWT_SECRET`, `INTERNAL_API_KEY`, `PAYMENT_WEBHOOK_SECRET`.
+- Docker: thêm `.dockerignore` (không đóng `.env` vào image), chạy bằng user `node`.
+- License key đã cấp (`payments.issued_raw_key`) mã hoá AES-256-GCM khi lưu (`enc:v1:...`), chỉ giải mã cho chủ đơn (có `X-Payment-Token`) và admin. Migration 012 nới cột lên VARCHAR(255); `npm run encrypt-issued-keys` mã hoá dữ liệu cũ (idempotent).
+- Thông báo Telegram/Discord chỉ hiện key đã che (`prefix…last4`). Trang quản lý thanh toán admin hiển thị lại key đầy đủ (trước đây API không trả field này).
+- PM2 chạy 1 instance (fork): rate limit lưu trong bộ nhớ từng process, cluster làm giới hạn chống brute-force bị nhân theo số CPU. Server cảnh báo nếu chạy cluster.
+
+### Added
+- CI GitHub Actions: test Bash + ShellCheck, `npm run check`/`npm test`/`npm audit` server, build admin.
+
+### Fixed
+- Monitor không còn kẹt vĩnh viễn ở `ERROR` (trước đây giữ lock và ngừng rejoin): tự quay về `UNKNOWN_ACTIVE` để quan sát, báo Discord 1 lần khi lỗi lặp lại 3 lần.
+- Vào sai Place ID giờ được rejoin thật: cần thấy ở 2 tick liên tiếp và xác nhận khác universe qua Roblox API. Teleport sang place con cùng game được bảo vệ; không tra được universe thì giữ nguyên process. Trước đây gate luôn từ chối nhưng vẫn gửi Discord "đang rejoin" mỗi phút.
+- `setup.sh` cài "tất cả hoặc không gì cả": ghim mọi file về cùng 1 commit SHA, tải vào thư mục tạm, kiểm tra `bash -n`, chuẩn hoá CRLF, đủ file mới thay. Trước đây lỗi tải `lib/` bị bỏ qua (trộn file cũ/mới) và có thể cài cả trang lỗi HTML. `VERSION` luôn cập nhật theo bản cài.
+- Xoá khối 243 dòng bị copy-paste trong `auto_rejoin.sh` (14 hàm định nghĩa 2 lần).
+- `scripts/build-release.sh` từ chối build khi script mang CRLF; thêm `.gitattributes` ép LF cho script.
+
+### Added
+- `AUTO_REJOIN_REF` cho `setup.sh` (nhánh, tag hoặc commit SHA) để ghim phiên bản production.
+- `tests/test_setup_install.sh`, `tests/test_script_hygiene.sh` và các test monitor cho wrong-place / `ERROR`.
+
 ### Added
 - Phase 4D signed auto-update foundation.
 - `lib/updater.sh` with signed manifest checks, semantic version comparison, artifact download, SHA256 and size verification, archive path validation, staging self-test, backup, apply, rollback, cleanup, and update locking.
