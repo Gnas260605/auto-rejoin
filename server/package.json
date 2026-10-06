@@ -8,13 +8,14 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "check": "node --check src/app.js && node --check src/server.js && node --check src/config/env.js && node --check src/db/pool.js && node --check src/db/migrate.js && node --check src/routes/license.routes.js && node --check src/controllers/license.controller.js && node --check src/services/license.service.js && node --check src/repositories/license.repository.js && node --check src/routes/admin.routes.js && node --check src/controllers/admin.controller.js && node --check src/services/admin.service.js && node --check src/repositories/admin.repository.js && node --check src/middleware/admin-auth.middleware.js && node --check src/middleware/admin-rate-limit.middleware.js && node --check src/utils/admin-auth.js && node --check src/constants/admin.js && node --check src/middleware/error.middleware.js && node --check src/middleware/rate-limit.middleware.js && node --check src/utils/token.js && node --check src/utils/time.js && node --check src/utils/response.js && node --check src/utils/logger.js && node --check src/constants/license.js && node --check scripts/create-license.js && node --check scripts/create-admin.js && node --check scripts/run-mysql-integration.js && node --check scripts/verify-production-readiness.js",
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/config/env.js && node --check src/db/pool.js && node --check src/db/migrate.js && node --check src/routes/license.routes.js && node --check src/controllers/license.controller.js && node --check src/services/license.service.js && node --check src/repositories/license.repository.js && node --check src/routes/admin.routes.js && node --check src/controllers/admin.controller.js && node --check src/services/admin.service.js && node --check src/repositories/admin.repository.js && node --check src/middleware/admin-auth.middleware.js && node --check src/middleware/admin-rate-limit.middleware.js && node --check src/utils/admin-auth.js && node --check src/constants/admin.js && node --check src/middleware/error.middleware.js && node --check src/middleware/rate-limit.middleware.js && node --check src/utils/token.js && node --check src/utils/time.js && node --check src/utils/response.js && node --check src/utils/logger.js && node --check src/constants/license.js && node --check scripts/create-license.js && node --check scripts/create-admin.js && node --check scripts/run-mysql-integration.js && node --check scripts/verify-production-readiness.js && node --check src/middleware/webhook-auth.middleware.js && node --check src/routes/payment.routes.js && node --check src/routes/internal.routes.js && node --check src/utils/crypto.js && node --check scripts/encrypt-issued-keys.js",
     "test": "node --test",
     "test:mysql": "node scripts/run-mysql-integration.js",
     "migrate": "node src/db/migrate.js",
     "create-license": "node scripts/create-license.js",
     "create-admin": "node scripts/create-admin.js",
-    "verify:prod": "node scripts/verify-production-readiness.js"
+    "verify:prod": "node scripts/verify-production-readiness.js",
+    "encrypt-issued-keys": "node scripts/encrypt-issued-keys.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

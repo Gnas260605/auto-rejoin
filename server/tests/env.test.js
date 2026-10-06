@@ -20,8 +20,28 @@ const productionBase = {
   COOKIE_SECURE: "true",
   RATE_LIMIT_ENABLED: "true",
   LICENSE_KEY_PEPPER: "prod_license_pepper_32_chars_minimum_value",
-  ADMIN_JWT_SECRET: "prod_admin_jwt_secret_32_chars_minimum_value"
+  ADMIN_JWT_SECRET: "prod_admin_jwt_secret_32_chars_minimum_value",
+  CUSTOMER_JWT_SECRET: "prod_customer_jwt_secret_32_chars_min_value"
 };
+
+test("production env requires explicit CUSTOMER_JWT_SECRET", () => {
+  assert.throws(
+    () => withEnv({ ...productionBase, CUSTOMER_JWT_SECRET: "" }, () => loadEnv()),
+    /CUSTOMER_JWT_SECRET must be set explicitly/
+  );
+});
+
+test("production env rejects CUSTOMER_JWT_SECRET equal to ADMIN_JWT_SECRET", () => {
+  assert.throws(
+    () => withEnv({ ...productionBase, CUSTOMER_JWT_SECRET: productionBase.ADMIN_JWT_SECRET }, () => loadEnv()),
+    /CUSTOMER_JWT_SECRET must differ from ADMIN_JWT_SECRET/
+  );
+});
+
+test("PAYMENT_WEBHOOK_SECRET is exposed as payment.webhookSecret", () => {
+  const env = withEnv({ ...productionBase, PAYMENT_WEBHOOK_SECRET: "bank_webhook_secret_value" }, () => loadEnv());
+  assert.equal(env.payment.webhookSecret, "bank_webhook_secret_value");
+});
 
 test("production env accepts strong explicit settings", () => {
   const env = withEnv(productionBase, () => loadEnv());

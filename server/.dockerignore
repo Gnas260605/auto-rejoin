@@ -1,0 +1,14 @@
+# Secret không bao giờ được đóng vào image: truyền lúc chạy (docker run --env-file / compose env_file).
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Cài lại trong image bằng npm ci cho đúng nền tảng Linux.
+node_modules
+npm-debug.log*
+
+tests
+coverage
+.nyc_output
+*.log

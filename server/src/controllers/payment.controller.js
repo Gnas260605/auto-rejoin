@@ -21,7 +21,7 @@ export class PaymentController {
   getStatus = async (req, res, next) => {
     try {
       const { paymentCode } = req.params;
-      const result = await this.service.getPaymentStatus(paymentCode);
+      const result = await this.service.getPaymentStatus(paymentCode, { paymentToken: req.get("x-payment-token") });
       res.json(result);
     } catch (error) {
       if (error instanceof PaymentServiceError) {
@@ -92,7 +92,8 @@ export class PaymentController {
       const { paymentCode } = req.params;
       const result = await this.service.cancelPaymentOrder(paymentCode, {
         reason: req.body?.reason || "user_cancelled",
-        adminContext: req.admin ? { adminId: req.admin.id, ip: req.ip } : null
+        adminContext: req.admin ? { adminId: req.admin.id, ip: req.ip } : null,
+        paymentToken: req.get("x-payment-token")
       });
       res.json(result);
     } catch (error) {

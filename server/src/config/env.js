@@ -49,7 +49,9 @@ export function loadEnv() {
 
   if (nodeEnv === "production") {
     requireProduction(jwtSecret.length >= 32 && !isPlaceholderSecret(jwtSecret), "ADMIN_JWT_SECRET must be at least 32 non-placeholder characters in production");
+    requireProduction(Boolean(process.env.CUSTOMER_JWT_SECRET), "CUSTOMER_JWT_SECRET must be set explicitly in production (do not reuse ADMIN_JWT_SECRET)");
     requireProduction(customerJwtSecret.length >= 32 && !isPlaceholderSecret(customerJwtSecret), "CUSTOMER_JWT_SECRET must be at least 32 non-placeholder characters in production");
+    requireProduction(customerJwtSecret !== jwtSecret, "CUSTOMER_JWT_SECRET must differ from ADMIN_JWT_SECRET in production");
     requireProduction(licenseKeyPepper.length >= 32 && !isPlaceholderSecret(licenseKeyPepper), "LICENSE_KEY_PEPPER must be at least 32 non-placeholder characters in production");
     requireProduction(!dbName.endsWith("_test"), "DB_NAME must not point to a _test database in production");
     requireProduction(adminOrigins.length > 0 && !adminOrigins.includes("*"), "ADMIN_ORIGIN must be explicit and must not include * in production");
@@ -60,7 +62,13 @@ export function loadEnv() {
   return {
     nodeEnv,
     port: intEnv("PORT", 3000),
+    // Number of reverse-proxy hops to trust for X-Forwarded-For (e.g. 1 behind nginx). 0 = off.
+    trustProxy: intEnv("TRUST_PROXY", 0),
     internalApiKey: process.env.INTERNAL_API_KEY || "",
+    payment: {
+      // Secret chung với SePay/Casso cho /api/v1/payments/webhook. Trống = webhook bị tắt ở production.
+      webhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || ""
+    },
     db: {
       host: process.env.DB_HOST || "127.0.0.1",
       port: intEnv("DB_PORT", 3306),
@@ -70,6 +78,8 @@ export function loadEnv() {
     },
     license: {
       keyPepper: licenseKeyPepper,
+      // Khoá mã hoá license key đã cấp (payments.issued_raw_key). Trống = dùng LICENSE_KEY_PEPPER.
+      keyEncryptionKey: process.env.LICENSE_KEY_ENCRYPTION_KEY || "",
       tokenTtlSeconds: intEnv("LICENSE_TOKEN_TTL_SECONDS", 2592000),
       revalidateAfterSeconds: intEnv("LICENSE_REVALIDATE_AFTER_SECONDS", 3600),
       minClientVersion: process.env.MIN_CLIENT_VERSION || "",

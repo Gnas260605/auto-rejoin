@@ -54,6 +54,7 @@ export function createApp({
 } = {}) {
   const app = express();
   app.disable("x-powered-by");
+  if (config.trustProxy > 0) app.set("trust proxy", config.trustProxy);
   app.use(helmet());
 
   const allowedOrigins = config.admin?.origins || [];
@@ -160,7 +161,7 @@ export function createApp({
 
   // Existing Core APIs
   app.use("/api/v1", createLicenseRouter({ controller: licController, rateLimits: licRateLimits }));
-  app.use("/api/v1", createPaymentRouter({ controller: payController, rateLimits: licRateLimits }));
+  app.use("/api/v1", createPaymentRouter({ controller: payController, rateLimits: licRateLimits, config }));
   app.use("/api/v1", createCommerceRouter({ controller: comController, rateLimits: licRateLimits }));
   app.use(
     "/api/v1/admin",

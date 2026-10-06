@@ -98,7 +98,7 @@ export function PaymentModal({ isOpen, onClose, selectedPlan, onKeyPurchased }) 
 
     const checkStatus = async () => {
       try {
-        const res = await api.getPaymentStatus(order.paymentCode);
+        const res = await api.getPaymentStatus(order.paymentCode, order.paymentToken);
         if (res.status === "paid" && res.licenseReady && res.license?.key) {
           setPaymentStatus("paid");
           setFulfilledKey(res.license.key);
@@ -129,7 +129,7 @@ export function PaymentModal({ isOpen, onClose, selectedPlan, onKeyPurchased }) 
   const handleCancelAndClose = async () => {
     if (order?.paymentCode && paymentStatus === "pending") {
       try {
-        api.cancelPaymentOrder(order.paymentCode, "user_cancelled").catch(() => {});
+        api.cancelPaymentOrder(order.paymentCode, "user_cancelled", order.paymentToken).catch(() => {});
       } catch (_e) {}
     }
     onClose();

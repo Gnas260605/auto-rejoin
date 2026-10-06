@@ -127,18 +127,20 @@ export const api = {
     }
     return data;
   },
-  getPaymentStatus: async (paymentCode) => {
-    const res = await fetch(`/api/v1/payments/${encodeURIComponent(paymentCode)}/status`);
+  getPaymentStatus: async (paymentCode, paymentToken = "") => {
+    const res = await fetch(`/api/v1/payments/${encodeURIComponent(paymentCode)}/status`, {
+      headers: paymentToken ? { "X-Payment-Token": paymentToken } : {}
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new ApiError(data.code || "PAYMENT_STATUS_ERROR", data.message || "Failed to get payment status", res.status);
     }
     return data;
   },
-  cancelPaymentOrder: async (paymentCode, reason = "user_cancelled") => {
+  cancelPaymentOrder: async (paymentCode, reason = "user_cancelled", paymentToken = "") => {
     const res = await fetch(`/api/v1/payments/${encodeURIComponent(paymentCode)}/cancel`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(paymentToken ? { "X-Payment-Token": paymentToken } : {}) },
       body: JSON.stringify({ reason })
     });
     const data = await res.json().catch(() => ({}));

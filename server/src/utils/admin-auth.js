@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 const BCRYPT_ROUNDS = 10;
+export const ADMIN_TOKEN_TYPE = "admin_access";
 
 export async function hashPassword(password) {
   if (typeof password !== "string" || password.length < 6) {
@@ -22,7 +23,8 @@ export function signAdminToken(admin, secret, expiresInSeconds = 86400) {
     {
       sub: String(admin.id),
       username: admin.username,
-      role: admin.role
+      role: admin.role,
+      type: ADMIN_TOKEN_TYPE
     },
     secret,
     {
@@ -32,9 +34,12 @@ export function signAdminToken(admin, secret, expiresInSeconds = 86400) {
   );
 }
 
+// Bắt buộc đúng loại token: nếu secret admin và khách hàng trùng nhau, token khách hàng
+// (sub = id khách hàng) vẫn không được dùng như token admin.
 export function verifyAdminToken(token, secret) {
   try {
-    return jwt.verify(token, secret, { algorithms: ["HS256"] });
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] });
+    return payload?.type === ADMIN_TOKEN_TYPE ? payload : null;
   } catch (_error) {
     return null;
   }

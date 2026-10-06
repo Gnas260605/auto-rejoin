@@ -159,7 +159,7 @@ export class PaymentRepository {
     const [rows] = await this.pool.execute(
       `SELECT id, payment_code, user_id, plan_id, plan_name, expected_amount, paid_amount,
               status, provider, provider_transaction_id, transfer_content, license_id,
-              created_at, paid_at, expired_at
+              issued_raw_key, created_at, paid_at, expired_at
        FROM payments
        ${whereSql}
        ORDER BY created_at DESC

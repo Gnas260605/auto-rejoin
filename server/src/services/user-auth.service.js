@@ -46,7 +46,11 @@ export class UserAuthService {
   }
 
   verifyAccessToken(token) {
-    return jwt.verify(token, this.jwtSecret);
+    const payload = jwt.verify(token, this.jwtSecret, { algorithms: ["HS256"] });
+    if (payload?.type !== "customer_access") {
+      throw new jwt.JsonWebTokenError("invalid token type");
+    }
+    return payload;
   }
 
   async register({ email, username, phone = null, password, fullName, displayName }) {

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { generateLicenseKey, hashLicenseKey, displayPartsForKey } from "../utils/token.js";
 import { secondsFromNow, nowDate } from "../utils/time.js";
 import { sendDiscordWebhook, sendTelegramNotification } from "../utils/notification.js";
+import { safeEqualSecret, sealValue, openSealedValue } from "../utils/crypto.js";
 
 export class PaymentServiceError extends Error {
   constructor(code, message, httpStatus = 400) {
@@ -64,6 +65,16 @@ export class PaymentService {
     this.licenseRepo = licenseRepository;
     this.adminRepo = adminRepository;
     this.config = config;
+    // License key đã cấp được mã hoá khi lưu DB (không lưu thô); chỉ giải mã khi trả cho chủ đơn/admin.
+    this.issuedKeySecret = config?.license?.keyEncryptionKey || config?.license?.keyPepper || "";
+  }
+
+  sealIssuedKey(rawKey) {
+    return sealValue(rawKey, this.issuedKeySecret);
+  }
+
+  revealIssuedKey(payment) {
+    return openSealedValue(payment?.issued_raw_key, this.issuedKeySecret);
   }
 
   async createPaymentOrder({ planId = "month", userId = null }) {
@@ -155,11 +166,13 @@ export class PaymentService {
       accountName: bankConfig.accountName,
       qrUrl,
       status: "pending",
-      expiredAt: expiredAt.toISOString()
+      expiredAt: expiredAt.toISOString(),
+      // Chỉ người tạo đơn có token này; cần để xem license key và huỷ đơn.
+      paymentToken: paymentSecretToken
     };
   }
 
-  async getPaymentStatus(paymentCode) {
+  async getPaymentStatus(paymentCode, { paymentToken = "" } = {}) {
     if (!paymentCode) {
       throw new PaymentServiceError("INVALID_CODE", "paymentCode is required", 400);
     }
@@ -176,13 +189,16 @@ export class PaymentService {
     }
 
     if (payment.status === "paid") {
+      // Biết mã đơn chưa đủ để lấy license key: phải có token trả về lúc tạo đơn.
+      const ownsOrder = safeEqualSecret(String(paymentToken || ""), String(payment.payment_secret_token || ""));
       return {
         ok: true,
         status: "paid",
         paymentCode: payment.payment_code,
         licenseReady: true,
+        tokenRequired: !ownsOrder,
         license: {
-          key: payment.issued_raw_key,
+          key: ownsOrder ? this.revealIssuedKey(payment) : null,
           plan: payment.plan_name,
           paidAt: payment.paid_at ? new Date(payment.paid_at).toISOString() : null
         }
@@ -228,7 +244,7 @@ export class PaymentService {
           success: true,
           alreadyPaid: true,
           paymentCode: payment.payment_code,
-          licenseKey: payment.issued_raw_key
+          licenseKey: this.revealIssuedKey(payment)
         };
       }
 
@@ -317,7 +333,7 @@ export class PaymentService {
         paidAmount: amountReceived,
         providerTransactionId: providerTxId || `TX-${Date.now()}`,
         licenseId,
-        issuedRawKey: rawKey
+        issuedRawKey: this.sealIssuedKey(rawKey)
       });
 
       // 8. Notifications
@@ -346,7 +362,7 @@ export class PaymentService {
       }
 
       if (payment.status === "paid") {
-        return { ok: true, alreadyPaid: true, paymentCode: payment.payment_code, licenseKey: payment.issued_raw_key };
+        return { ok: true, alreadyPaid: true, paymentCode: payment.payment_code, licenseKey: this.revealIssuedKey(payment) };
       }
 
       // Generate license key
@@ -390,7 +406,7 @@ export class PaymentService {
         paidAmount: payment.expected_amount,
         providerTransactionId: `ADMIN-MANUAL-${adminContext.adminId || "ADMIN"}-${Date.now()}`,
         licenseId,
-        issuedRawKey: rawKey
+        issuedRawKey: this.sealIssuedKey(rawKey)
       });
 
       await this.adminRepo.insertAudit({
@@ -413,15 +429,22 @@ export class PaymentService {
     });
   }
 
+  // Chỉ gọi từ route admin (đã xác thực): giải mã key để admin tra cứu/hỗ trợ khách.
   async listPayments(params) {
-    return this.paymentRepo.listPayments(params);
+    const result = await this.paymentRepo.listPayments(params);
+    return {
+      ...result,
+      items: (result.items || []).map((p) => ({ ...p, issued_raw_key: this.revealIssuedKey(p) }))
+    };
   }
 
   async getRevenueStats() {
     return this.paymentRepo.getRevenueStats();
   }
 
-  async cancelPaymentOrder(paymentCodeOrId, { reason = "user_cancelled", adminContext = null } = {}) {
+  async cancelPaymentOrder(paymentCodeOrId, { reason = "user_cancelled", adminContext = null, paymentToken = null } = {}) {
+    // Không phải admin -> bắt buộc token của người tạo đơn (chặn huỷ hàng loạt đơn của người khác theo id/mã).
+    const requireOwnerToken = !adminContext?.adminId;
     let payment = null;
     if (Number.isInteger(Number(paymentCodeOrId)) && Number(paymentCodeOrId) > 0) {
       payment = await this.paymentRepo.findPaymentByIdForUpdate(Number(paymentCodeOrId));
@@ -431,6 +454,10 @@ export class PaymentService {
 
     if (!payment) {
       throw new PaymentServiceError("PAYMENT_NOT_FOUND", "Không tìm thấy thông tin đơn hàng", 404);
+    }
+
+    if (requireOwnerToken && !safeEqualSecret(String(paymentToken || ""), String(payment.payment_secret_token || ""))) {
+      throw new PaymentServiceError("INVALID_PAYMENT_TOKEN", "Không có quyền huỷ đơn hàng này", 403);
     }
 
     if (payment.status === "paid") {
@@ -595,13 +622,16 @@ export class PaymentService {
       const discordWebhook = savedSettings.discordWebhook;
       const telegramBotToken = savedSettings.telegramBotToken;
       const telegramChatId = savedSettings.telegramChatId;
+      // Không gửi key đầy đủ lên dịch vụ bên thứ ba; admin xem key đầy đủ trong trang quản lý thanh toán.
+      const { prefix, last4 } = displayPartsForKey(String(rawKey || ""));
+      const maskedKey = rawKey ? `${prefix}…${last4}` : "(không có)";
 
       const notificationText = `🛒 <b>ĐƠN HÀNG THANH TOÁN THÀNH CÔNG</b>\n` +
         `• Mã đơn: <code>${payment.payment_code}</code>\n` +
         `• Nội dung CK: <code>${payment.transfer_content}</code>\n` +
         `• Gói mua: <b>${payment.plan_name}</b>\n` +
         `• Số tiền: <b>${Number(amount).toLocaleString("vi-VN")} đ</b>\n` +
-        `• License Key Cấp Cho Khách: <code>${rawKey}</code>\n` +
+        `• License Key Cấp Cho Khách: <code>${maskedKey}</code>\n` +
         `• Thời gian: ${new Date().toLocaleString("vi-VN")}`;
 
       if (telegramBotToken && telegramChatId) {
@@ -618,7 +648,7 @@ export class PaymentService {
               { name: "Nội Dung CK", value: payment.transfer_content, inline: true },
               { name: "Gói Mua", value: payment.plan_name, inline: true },
               { name: "Số Tiền Nhận", value: `${Number(amount).toLocaleString("vi-VN")} đ`, inline: true },
-              { name: "License Key Đã Cấp", value: `\`${rawKey}\``, inline: false }
+              { name: "License Key Đã Cấp", value: `\`${maskedKey}\``, inline: false }
             ],
             footer: { text: "Hệ thống xác thực thanh toán tự động Auto Rejoin Pro" },
             timestamp: new Date().toISOString()

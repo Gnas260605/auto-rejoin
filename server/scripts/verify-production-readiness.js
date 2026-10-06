@@ -53,6 +53,24 @@ check(
 );
 
 check(
+  "CUSTOMER_JWT_SECRET is strong and differs from ADMIN_JWT_SECRET",
+  hasStrongSecret(env.customer.jwtSecret) && env.customer.jwtSecret !== env.admin.jwtSecret,
+  `length=${env.customer.jwtSecret.length} sameAsAdmin=${env.customer.jwtSecret === env.admin.jwtSecret}`
+);
+
+check(
+  "INTERNAL_API_KEY is strong (Shop M2M)",
+  hasStrongSecret(env.internalApiKey),
+  `length=${env.internalApiKey.length}`
+);
+
+check(
+  "PAYMENT_WEBHOOK_SECRET is strong (bank webhook enabled)",
+  hasStrongSecret(env.payment.webhookSecret),
+  env.payment.webhookSecret ? `length=${env.payment.webhookSecret.length}` : "empty -> /api/v1/payments/webhook returns 503"
+);
+
+check(
   "COOKIE_SECURE is enabled",
   env.admin.cookieSecure === true,
   `current=${env.admin.cookieSecure}`
