@@ -110,7 +110,18 @@ check_roblox_task_present() { [ "$TASK_PRESENT" = "true" ]; }
 is_in_game() { [ "$IN_GAME" = "true" ]; }
 check_roblox_log_for_disconnect() { [ "$DISCONNECT" = "true" ]; }
 check_roblox_screen_for_disconnect() { [ "$SCREEN_DISCONNECT" = "true" ]; }
-check_roblox_log_for_wrong_place() { [ "$WRONG_PLACE" = "true" ]; }
+check_roblox_log_for_wrong_place() {
+    WRONG_PLACE_OBSERVED=""
+    [ "$WRONG_PLACE" = "true" ] || return 1
+    WRONG_PLACE_OBSERVED=999
+}
+# PLACE_ID=1 -> EXPECTED_UNIVERSE, place 999 -> OBSERVED_UNIVERSE; rỗng = API lỗi.
+roblox_api_place_to_universe() {
+    local u
+    if [ "$1" = "$PLACE_ID" ]; then u="$EXPECTED_UNIVERSE"; else u="$OBSERVED_UNIVERSE"; fi
+    [ -n "$u" ] || return 1
+    printf '%s\n' "$u"
+}
 check_roblox_log_for_queue() { [ "$QUEUE" = "true" ]; }
 detect_roblox_session_state() { if [ "$APP_HOME" = "true" ]; then printf 'APP_HOME\n'; else printf 'UNKNOWN\n'; fi; }
 
@@ -198,6 +209,13 @@ reset_monitor_state() {
     STALLED_ACTIVE_STARTED_AT=0
     MONITOR_OFFLINE_NOTIFIED=false
     MONITOR_COOLDOWN_NOTIFIED=false
+    MONITOR_ERROR_COUNT=0
+    WRONG_PLACE_STREAK=0
+    WRONG_PLACE_NOTIFIED=false
+    WRONG_PLACE_OBSERVED=""
+    WRONG_PLACE_LAST_VERDICT=""
+    EXPECTED_UNIVERSE=100
+    OBSERVED_UNIVERSE=200
     RUNTIME_BACKOFF_FAILURES=0
     RUNTIME_FAILURE_HISTORY=""
     RUNTIME_COOLDOWN_UNTIL=0
@@ -474,12 +492,94 @@ test_screen_disconnect_authorized() {
 test_wrong_place_goes_to_recovery_but_gate_protects_without_evidence() {
     reset_monitor_state
     MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    IN_GAME=true
     WRONG_PLACE=true
     monitor_tick
-    assert_eq "wrong place requests recovery" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "wrong place 1 tick chua xac nhan" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    assert_eq "wrong place 1 tick discord=0" "0" "$DISCORD_COUNT"
     WRONG_PLACE=false
     monitor_tick
     assert_eq "wrong place stale evidence force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "wrong place stale evidence reset streak" "0" "$WRONG_PLACE_STREAK"
+}
+
+test_wrong_place_confirmed_rejoins_once() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    IN_GAME=true
+    WRONG_PLACE=true
+    monitor_tick
+    monitor_tick
+    assert_eq "wrong place 2 tick -> recovery" "$MONITOR_STATE_RECOVERING" "$MONITOR_STATE"
+    assert_eq "wrong place discord dung 1 lan" "1" "$DISCORD_COUNT"
+    monitor_tick
+    assert_eq "wrong place confirmed force-stop=1" "1" "$FORCE_STOP_COUNT"
+    assert_eq "wrong place authorized_by" "wrong_place" "$MONITOR_RECOVERY_AUTHORIZED_BY"
+    assert_eq "wrong place streak reset sau recovery" "0" "$WRONG_PLACE_STREAK"
+}
+
+test_wrong_place_no_discord_spam() {
+    local i
+    reset_monitor_state
+    WRONG_PLACE_DISCORD=0
+    send_discord() { case "$1" in *"sai game"*) WRONG_PLACE_DISCORD=$((WRONG_PLACE_DISCORD + 1)) ;; esac; }
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    IN_GAME=true
+    WRONG_PLACE=true
+    # Rejoin xong van roi vao sai game nhieu lan.
+    for i in 1 2 3 4 5 6 7 8 9 10; do MONITOR_NOW=$((1000 + i * 30)); monitor_tick; done
+    send_discord() { DISCORD_COUNT=$((DISCORD_COUNT + 1)); }
+    assert_eq "wrong place nhieu vong recovery van chi 1 discord" "1" "$WRONG_PLACE_DISCORD"
+    [ "$FORCE_STOP_COUNT" -ge 2 ] && pass "wrong place lap lai van recovery" || fail "wrong place lap lai van recovery force=$FORCE_STOP_COUNT"
+}
+
+test_wrong_place_same_universe_protected() {
+    local i
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    IN_GAME=true
+    WRONG_PLACE=true
+    OBSERVED_UNIVERSE=100
+    for i in 1 2 3 4; do monitor_tick; done
+    assert_eq "same universe giu IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    assert_eq "same universe force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_eq "same universe discord=0" "0" "$DISCORD_COUNT"
+    assert_contains "same universe log" "wrong_place_same_universe" "$LOG_FILE"
+}
+
+test_wrong_place_universe_unknown_protected() {
+    local i
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    IN_GAME=true
+    WRONG_PLACE=true
+    OBSERVED_UNIVERSE=""
+    for i in 1 2 3 4; do monitor_tick; done
+    assert_eq "universe unknown giu IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    assert_eq "universe unknown force-stop=0" "0" "$FORCE_STOP_COUNT"
+    assert_contains "universe unknown log" "wrong_place_unverified" "$LOG_FILE"
+}
+
+test_error_state_recovers_to_observation() {
+    reset_monitor_state
+    MONITOR_STATE="$MONITOR_STATE_ERROR"
+    RUNNING=false
+    monitor_tick
+    assert_eq "ERROR -> UNKNOWN_ACTIVE" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
+    monitor_tick
+    assert_eq "ERROR roi process chet -> CRASHED" "$MONITOR_STATE_CRASHED" "$MONITOR_STATE"
+    assert_eq "ERROR recovery khong force-stop" "0" "$FORCE_STOP_COUNT"
+}
+
+test_error_state_alerts_once() {
+    local i
+    reset_monitor_state
+    for i in 1 2 3 4 5; do
+        MONITOR_STATE="$MONITOR_STATE_ERROR"
+        monitor_tick
+    done
+    assert_eq "ERROR lap lai discord 1 lan" "1" "$DISCORD_COUNT"
+    assert_eq "ERROR dem so lan" "5" "$MONITOR_ERROR_COUNT"
 }
 
 test_queue_without_disconnect_cannot_force_stop() {
@@ -597,6 +697,12 @@ test_startup_app_home_recovery_requested
 test_launch_failure_without_gate_stays_protected
 test_screen_disconnect_authorized
 test_wrong_place_goes_to_recovery_but_gate_protects_without_evidence
+test_wrong_place_confirmed_rejoins_once
+test_wrong_place_no_discord_spam
+test_wrong_place_same_universe_protected
+test_wrong_place_universe_unknown_protected
+test_error_state_recovers_to_observation
+test_error_state_alerts_once
 test_queue_without_disconnect_cannot_force_stop
 test_cooldown_expired_rechecks_gate
 test_anti_afk_only_when_confirmed

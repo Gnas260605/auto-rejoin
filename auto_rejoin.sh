@@ -378,249 +378,6 @@ scan_all_usernames() {
 
 
 
-MGT='\033[0;35m'
-CYN='\033[0;36m'
-WHT='\033[1;37m'
-BGRN='\033[1;32m'   # Bright Green
-BYLN='\033[1;33m'   # Bright Yellow
-NC='\033[0m'
-
-# ── Âm thanh thông báo (beep qua /dev/tty nếu có) ───────
-beep_ok()   { printf '\a' 2>/dev/null; }
-beep_warn() { printf '\a\a' 2>/dev/null; }
-
-# ── Ghi log ─────────────────────────────────────────────
-log_msg() {
-    local ts; ts=$(date '+%Y-%m-%d %H:%M:%S')
-    local display
-    display="$(log_redact_secret "$1")"
-    echo -e "${CYN}[$ts]${NC} $display"
-    log_info "$display" "$LOG_FILE"
-}
-
-# ── Gửi Discord Webhook ──────────────────────────────────
-send_discord() {
-    if declare -F entitlement_discord_allowed >/dev/null 2>&1 && ! entitlement_discord_allowed; then
-        if [ "${ENTITLEMENT_DISCORD_WARNED:-false}" != "true" ]; then
-            log_event WARN discord_entitlement_blocked "$LOG_FILE" package "${ROBLOX_PACKAGE:-unknown}" reason "missing_discord_entitlement"
-            ENTITLEMENT_DISCORD_WARNED=true
-        fi
-        return 0
-    fi
-    notification_send_discord "${DISCORD_WEBHOOK:-}" "$1" || true
-}
-
-# ── Thống kê rejoin ──────────────────────────────────────
-inc_rejoin_count() {
-    local pkg="${1:-$ROBLOX_PACKAGE}"
-    local stats_file="roblox_stats_${pkg}.dat"
-    local count=0
-    [ -f "$stats_file" ] && count=$(cat "$stats_file" 2>/dev/null)
-    count=$(( ${count:-0} + 1 ))
-    echo "$count" > "$stats_file"
-}
-
-get_rejoin_count() {
-    local pkg="${1:-$ROBLOX_PACKAGE}"
-    local stats_file="roblox_stats_${pkg}.dat"
-    if [ -f "$stats_file" ]; then
-        cat "$stats_file" 2>/dev/null
-    else
-        # Fallback đọc từ file stats cũ nếu có
-        local key="rejoin_${pkg//[^a-zA-Z0-9]/_}"
-        [ -f "roblox_stats.dat" ] && grep "^${key}=" "roblox_stats.dat" 2>/dev/null | cut -d= -f2 || echo "0"
-    fi
-}
-
-# ── Tải/Lưu cấu hình ─────────────────────────────────────
-load_config() {
-    if ! config_load "$CONFIG_FILE"; then
-        log_msg "${YLW}[CONFIG]${NC} Config có giá trị không hợp lệ; đã dùng default an toàn cho key lỗi."
-    fi
-    if [ -n "$CONFIG_WARNINGS" ]; then
-        while IFS= read -r warning; do
-            [ -n "$warning" ] && log_msg "${YLW}[CONFIG]${NC} $warning"
-        done <<EOF
-$CONFIG_WARNINGS
-EOF
-    fi
-}
-
-save_config() {
-    if ! config_save "$CONFIG_FILE"; then
-        log_msg "${RED}[CONFIG]${NC} Không thể lưu config: $CONFIG_FILE"
-        return 1
-    fi
-}
-
-# ── Chạy lệnh với timeout để tránh treo vĩnh viễn ───────
-run_with_timeout() {
-    local secs="$1"; shift
-    if command -v timeout > /dev/null 2>&1; then
-        timeout "$secs" "$@"
-    else
-        # Fallback: chạy nền + wait với giới hạn thời gian
-        "$@" &
-        local pid=$!
-        local i=0
-        while kill -0 "$pid" 2>/dev/null && [ $i -lt "$secs" ]; do
-            sleep 1; i=$((i+1))
-        done
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null
-            return 124
-        fi
-        wait "$pid" 2>/dev/null
-    fi
-}
-
-# ── Phát hiện executor ───────────────────────────────────
-detect_executor() {
-    android_detect_executor
-}
-
-EXECUTOR=""
-# Chỉ quét executor 1 lần, cache lại để không quét lại mỗi lần vẽ menu
-init_executor() {
-    [ -n "$EXECUTOR" ] && return
-    EXECUTOR=$(detect_executor)
-    android_set_executor "$EXECUTOR"
-}
-
-run_cmd() {
-    echo "run_cmd is deprecated; use lib/android.sh typed wrappers" >&2
-    return 2
-}
-
-# ── Tự động quét username Roblox ─────────────────────────
-# Đa phương thức: Lua Companion file → Roblox Client Logs → SharedPrefs → SQLite → Config
-get_roblox_username() {
-    local pkg="${1:-$ROBLOX_PACKAGE}"
-    local uname=""
-
-    # 1. Đọc từ file do Lua Companion Script xuất ra (chính xác 100% khi game chạy)
-    local user_file_paths=(
-        "/sdcard/Android/data/$pkg/files/roblox_username.txt"
-        "/data/data/$pkg/files/roblox_username.txt"
-        "/sdcard/Delta/workspace/roblox_username.txt"
-        "/sdcard/Fluxus/workspace/roblox_username.txt"
-        "/sdcard/Codex/workspace/roblox_username.txt"
-        "/sdcard/Arceus/workspace/roblox_username.txt"
-        "/sdcard/Hydrogen/workspace/roblox_username.txt"
-    )
-    for ufp in "${user_file_paths[@]}"; do
-        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
-
-')" ]; then
-            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
-
- ')
-            [ -n "$uname" ] && break
-        fi
-    done
-
-    # 2. Đọc từ file Log Roblox (hoạt động kể cả không root)
-    if [ -z "$uname" ]; then
-        local log_dir=""
-        if [ -n "$(android_log_dir_exists "/sdcard/Android/data/$pkg/files/logs" 2>/dev/null | tr -d '
-
-')" ]; then
-            log_dir="/sdcard/Android/data/$pkg/files/logs"
-        elif [ -n "$(android_log_dir_exists "/data/data/$pkg/files/logs" 2>/dev/null | tr -d '
-
-')" ]; then
-            log_dir="/data/data/$pkg/files/logs"
-        fi
-        if [ -n "$log_dir" ]; then
-            local latest_log
-            latest_log=$(android_latest_log_file "$log_dir" 2>/dev/null | head -n 1 | tr -d '
-
-')
-            if [ -n "$latest_log" ]; then
-                local log_sample
-                log_sample=$(android_tail_lines 300 "$log_dir/$latest_log" 2>/dev/null)
-                # 2.1: Bắt từ companion script tag
-                uname=$(echo "$log_sample" | grep -Eio '\[AUTO_REJOIN_USER\][[:space:]]*[A-Za-z0-9_]+' | head -n 1 | awk '{print $2}')
-                # 2.2: Bắt từ FLog::PlayerInfo hoặc UserName
-                if [ -z "$uname" ]; then
-                    uname=$(echo "$log_sample" | grep -Eio '(UserName|username)[:= ][[:space:]]*[A-Za-z0-9_]{3,30}' | head -n 1 | awk '{print $NF}' | tr -d '"')
-                fi
-                # 2.3: Bắt từ Connection accepted for player
-                if [ -z "$uname" ]; then
-                    uname=$(echo "$log_sample" | grep -Eio 'player[[:space:]]*:[[:space:]]*[0-9]+[[:space:]]*\([A-Za-z0-9_]+\)' | grep -oE '\([A-Za-z0-9_]+\)' | tr -d '()' | head -n 1)
-                fi
-            fi
-        fi
-    fi
-
-    # 3. Nếu có Root: thử đọc trực tiếp từ SharedPreferences / SQLite / JSON
-    if [ -z "$uname" ]; then
-        local has_root=false
-        [ "$(android_detect_executor)" = "su" ] && has_root=true
-
-        if $has_root; then
-            uname=$(android_app_grep_recursive "$pkg" shared_prefs 'username\|displayName\|display_name\|playerName\|userName\|name' 2>/dev/null \
-                | grep -oP '(?<=value=")[^"]{3,40}' \
-                | grep -v '^[0-9]*$' \
-                | grep -v 'true\|false\|null' \
-                | head -1 2>/dev/null)
-
-            if [ -z "$uname" ]; then
-                local db_file
-                db_file=$(android_app_list_databases "$pkg" 2>/dev/null | grep '\.db$' | head -1 | tr -d '
-')
-                if [ -n "$db_file" ]; then
-                    uname=$(android_app_sqlite_query "$pkg" "$db_file" "SELECT value FROM settings WHERE key LIKE '%username%' OR key LIKE '%name%' LIMIT 1;" 2>/dev/null | head -1)
-                fi
-            fi
-
-            if [ -z "$uname" ]; then
-                local account_files account_file
-                account_files=$(android_app_find_account_files "$pkg" 2>/dev/null)
-                for account_file in $account_files; do
-                    uname=$(android_app_grep_file "$account_file" '"username"' 2>/dev/null \
-                        | grep -oP '(?<="username":")[^"]+' | head -1 2>/dev/null)
-                    [ -n "$uname" ] && break
-                done
-            fi
-        fi
-    fi
-
-    # 4. Fallback: đọc từ file config (đã nhập tay trước đó)
-    if [ -z "$uname" ]; then
-        local cfg="config_${pkg}.cfg"
-        uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
-    fi
-
-    echo "${uname:-N/A}"
-}
-
-# ── Quét username cho tất cả acc và lưu vào config ───────
-scan_all_usernames() {
-    local cfgs; cfgs=$(ls config_com*.cfg 2>/dev/null)
-    [ -z "$cfgs" ] && [ -f "config.cfg" ] && cfgs="config.cfg"
-    [ -z "$cfgs" ] && return
-
-    local found=0
-    for cfg in $cfgs; do
-        local pkg; pkg=$(grep '^ROBLOX_PACKAGE=' "$cfg" | cut -d'"' -f2)
-        [ -z "$pkg" ] && continue
-        local uname; uname=$(get_roblox_username "$pkg")
-        if [ "$uname" != "N/A" ] && [ -n "$uname" ]; then
-            # Cập nhật vào config
-            if grep -q '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null; then
-                sed -i "s/^ROBLOX_USERNAME=.*/ROBLOX_USERNAME=\"$uname\"/" "$cfg"
-            else
-                echo "ROBLOX_USERNAME=\"$uname\"" >> "$cfg"
-            fi
-            found=$((found+1))
-        fi
-    done
-    echo "$found"
-}
-
-
-
 # ══════════════════════════════════════════════════════════
 #  Lấy danh sách tất cả file config
 # ══════════════════════════════════════════════════════════
@@ -1418,11 +1175,13 @@ check_roblox_log_for_disconnect() {
 #  CHẾ ĐỘ --run : VÒNG LẶP GIÁM SÁT (chạy trong tmux)
 # ══════════════════════════════════════════════════════════
 # Phat hien Roblox da vao nham experience/placeId tu log phien hien tai.
+# Chi phat hien + dat WRONG_PLACE_OBSERVED; log/Discord/xac nhan universe nam o lib/monitor.sh.
 check_roblox_log_for_wrong_place() {
     local pkg="$ROBLOX_PACKAGE"
     local expected_place="$PLACE_ID"
     local log_dir=""
 
+    WRONG_PLACE_OBSERVED=""
     roblox_validate_place_id "$expected_place" || return 1
 
     if declare -F session_poll_incremental >/dev/null 2>&1; then
@@ -1430,8 +1189,7 @@ check_roblox_log_for_wrong_place() {
         session_poll_incremental "$pkg" >/dev/null 2>&1 || true
         observed_place_session="$(session_get_observed_place "$pkg")"
         if [ -n "$observed_place_session" ] && [ "$observed_place_session" != "$expected_place" ]; then
-            log_msg "${RED}[PLACE]${NC} Roblox dang o sai Place ID ${observed_place_session}; can ${expected_place}. Rejoin lai dung deep-link..."
-            log_event WARN wrong_place_detected "$LOG_FILE" package "$pkg" expected_place "$expected_place" observed_place "$observed_place_session"
+            WRONG_PLACE_OBSERVED="$observed_place_session"
             return 0
         fi
         return 1
@@ -1464,8 +1222,7 @@ check_roblox_log_for_wrong_place() {
     [ -z "$observed_place" ] && return 1
     [ "$observed_place" = "$expected_place" ] && return 1
 
-    log_msg "${RED}[PLACE]${NC} Roblox dang o sai Place ID ${observed_place}; can ${expected_place}. Rejoin lai dung deep-link..."
-    log_event WARN wrong_place_detected "$LOG_FILE" package "$pkg" expected_place "$expected_place" observed_place "$observed_place"
+    WRONG_PLACE_OBSERVED="$observed_place"
     return 0
 }
 

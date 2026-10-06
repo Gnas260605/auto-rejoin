@@ -37,6 +37,13 @@ UNKNOWN_ACTIVE_WAKE_AFTER="${UNKNOWN_ACTIVE_WAKE_AFTER:-60}"
 UNKNOWN_ACTIVE_WAKE_BACKOFF="${UNKNOWN_ACTIVE_WAKE_BACKOFF:-60}"
 STALLED_ACTIVE_TIMEOUT="${STALLED_ACTIVE_TIMEOUT:-180}"
 HEARTBEAT_STALE_SECONDS="${HEARTBEAT_STALE_SECONDS:-0}"
+MONITOR_ERROR_COUNT="${MONITOR_ERROR_COUNT:-0}"
+MONITOR_ERROR_ALERT_AFTER="${MONITOR_ERROR_ALERT_AFTER:-3}"
+WRONG_PLACE_CONFIRM_TICKS="${WRONG_PLACE_CONFIRM_TICKS:-2}"
+WRONG_PLACE_STREAK="${WRONG_PLACE_STREAK:-0}"
+WRONG_PLACE_NOTIFIED="${WRONG_PLACE_NOTIFIED:-false}"
+WRONG_PLACE_OBSERVED="${WRONG_PLACE_OBSERVED:-}"
+WRONG_PLACE_LAST_VERDICT="${WRONG_PLACE_LAST_VERDICT:-}"
 
 monitor_now() {
     if [ -n "${MONITOR_NOW:-}" ]; then
@@ -129,6 +136,11 @@ monitor_recovery_is_authorized() {
             MONITOR_RECOVERY_AUTHORIZED_BY="app_home"
             return 0
         fi
+    fi
+
+    if [ "$reason" = "wrong_place_detected" ] && monitor_wrong_place_confirmed; then
+        MONITOR_RECOVERY_AUTHORIZED_BY="wrong_place"
+        return 0
     fi
 
     if [ "$reason" = "stalled_active" ] && monitor_stall_detected; then
@@ -230,8 +242,63 @@ monitor_note_stable_game() {
     fi
 }
 
+# Thô: log phiên hiện tại cho thấy place khác PLACE_ID. Đặt WRONG_PLACE_OBSERVED.
 monitor_wrong_place_detected() {
     declare -F check_roblox_log_for_wrong_place >/dev/null 2>&1 && check_roblox_log_for_wrong_place
+}
+
+# 0 = cùng universe (teleport hợp lệ sang place con), 1 = khác game, 2 = không xác minh được.
+monitor_place_universe_relation() {
+    local observed="$1" expected_universe observed_universe
+
+    [ -n "$observed" ] || return 2
+    declare -F roblox_api_place_to_universe >/dev/null 2>&1 || return 2
+    expected_universe="$(roblox_api_place_to_universe "$PLACE_ID" 2>/dev/null)" || return 2
+    observed_universe="$(roblox_api_place_to_universe "$observed" 2>/dev/null)" || return 2
+    [ -n "$expected_universe" ] && [ -n "$observed_universe" ] || return 2
+    [ "$expected_universe" = "$observed_universe" ] && return 0
+    return 1
+}
+
+# Bằng chứng hợp lệ cho recovery: sai place ở WRONG_PLACE_CONFIRM_TICKS tick liên tiếp VÀ khác universe.
+# Không tra được universe (API lỗi/429) thì không xác nhận -> giữ nguyên process.
+monitor_wrong_place_confirmed() {
+    local relation=0 verdict
+
+    [ "${WRONG_PLACE_STREAK:-0}" -ge "${WRONG_PLACE_CONFIRM_TICKS:-2}" ] || return 1
+    monitor_wrong_place_detected || return 1
+    monitor_place_universe_relation "$WRONG_PLACE_OBSERVED" || relation=$?
+
+    verdict="${WRONG_PLACE_OBSERVED}:${relation}"
+    if [ "$verdict" != "$WRONG_PLACE_LAST_VERDICT" ]; then
+        WRONG_PLACE_LAST_VERDICT="$verdict"
+        case "$relation" in
+            0) log_event INFO wrong_place_same_universe "$LOG_FILE" package "$ROBLOX_PACKAGE" expected_place "$PLACE_ID" observed_place "$WRONG_PLACE_OBSERVED" ;;
+            1) log_event WARN wrong_place_confirmed "$LOG_FILE" package "$ROBLOX_PACKAGE" expected_place "$PLACE_ID" observed_place "$WRONG_PLACE_OBSERVED" streak "$WRONG_PLACE_STREAK" ;;
+            *) log_event WARN wrong_place_unverified "$LOG_FILE" package "$ROBLOX_PACKAGE" expected_place "$PLACE_ID" observed_place "$WRONG_PLACE_OBSERVED" ;;
+        esac
+    fi
+    [ "$relation" -eq 1 ]
+}
+
+# Gọi đúng 1 lần mỗi tick. Trả 0 khi cần rejoin vì sai game; tự gửi Discord tối đa 1 lần mỗi sự cố.
+monitor_track_wrong_place() {
+    if ! monitor_wrong_place_detected; then
+        WRONG_PLACE_STREAK=0
+        WRONG_PLACE_NOTIFIED=false
+        WRONG_PLACE_LAST_VERDICT=""
+        return 1
+    fi
+
+    WRONG_PLACE_STREAK=$((WRONG_PLACE_STREAK + 1))
+    monitor_wrong_place_confirmed || return 1
+
+    log_msg "${RED}[PLACE]${NC} Roblox đang ở sai game (Place ${WRONG_PLACE_OBSERVED}, cần ${PLACE_ID}). Rejoin lại đúng game..."
+    if [ "$WRONG_PLACE_NOTIFIED" != "true" ]; then
+        send_discord "[WARN] **[$ROBLOX_PACKAGE]** Roblox vào sai game (Place ${WRONG_PLACE_OBSERVED}). Đang rejoin lại đúng Place ${PLACE_ID}..."
+        WRONG_PLACE_NOTIFIED=true
+    fi
+    return 0
 }
 
 monitor_disconnect_detected() {
@@ -326,6 +393,9 @@ monitor_launch_once() {
     if [ "$reason" = "window_closed" ]; then
         log_event INFO window_relaunch_success "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
     fi
+    # Phiên mới -> phải xác nhận lại sai place từ đầu. WRONG_PLACE_NOTIFIED giữ nguyên để không spam Discord.
+    WRONG_PLACE_STREAK=0
+    WRONG_PLACE_LAST_VERDICT=""
     monitor_transition "$MONITOR_STATE_LOADING" "$reason"
 }
 
@@ -414,8 +484,7 @@ monitor_handle_loading() {
         return 0
     fi
 
-    if monitor_wrong_place_detected; then
-        send_discord "[WARN] **[$ROBLOX_PACKAGE]** Roblox vao sai Place ID. Dang rejoin lai dung game..."
+    if monitor_track_wrong_place; then
         monitor_request_recovery "wrong_place_detected" "true"
         return 0
     fi
@@ -523,8 +592,7 @@ monitor_handle_in_game() {
         return 0
     fi
 
-    if monitor_wrong_place_detected; then
-        send_discord "[WARN] **[$ROBLOX_PACKAGE]** Roblox vao sai Place ID. Dang rejoin lai dung game..."
+    if monitor_track_wrong_place; then
         monitor_request_recovery "wrong_place_detected" "true"
         return 0
     fi
@@ -552,6 +620,7 @@ monitor_handle_in_game() {
     monitor_note_stable_game "$now"
     LAST_IN_GAME="$now"
     WINDOW_MISSING_COUNT=0
+    MONITOR_ERROR_COUNT=0
     if [ "$LOBBY_RETRY_COUNT" -gt 0 ]; then
         log_msg "${GRN}[GAME]${NC} Đã vào game thành công! Reset bộ đếm sảnh."
         LOBBY_RETRY_COUNT=0
@@ -731,6 +800,16 @@ monitor_tick() {
                 fi
             fi
             ;;
+        "$MONITOR_STATE_ERROR")
+            # Không bao giờ kẹt ở ERROR: quay về UNKNOWN_ACTIVE (chỉ quan sát, không kill),
+            # từ đó state machine tự đi tiếp sang CRASHED / IN_GAME / DISCONNECTED theo bằng chứng.
+            MONITOR_ERROR_COUNT=$((MONITOR_ERROR_COUNT + 1))
+            log_event ERROR monitor_error_recover "$LOG_FILE" package "$ROBLOX_PACKAGE" previous "$MONITOR_PREVIOUS_STATE" reason "$MONITOR_REASON" count "$MONITOR_ERROR_COUNT"
+            if [ "$MONITOR_ERROR_COUNT" -eq "$MONITOR_ERROR_ALERT_AFTER" ]; then
+                send_discord "⚠️ **[$ROBLOX_PACKAGE]** Monitor gặp lỗi lặp lại ${MONITOR_ERROR_COUNT} lần (${MONITOR_REASON}). Kiểm tra log."
+            fi
+            monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "error_recovered"
+            ;;
         "$MONITOR_STATE_STALLED_ACTIVE")
             if ! is_roblox_running; then
                 monitor_transition "$MONITOR_STATE_CRASHED" "process_missing"
@@ -777,6 +856,9 @@ monitor_run() {
     MONITOR_LOOP_ITERATION=0
     UNKNOWN_ACTIVE_LAST_WAKE_AT=0
     STALLED_ACTIVE_STARTED_AT=0
+    MONITOR_ERROR_COUNT=0
+    WRONG_PLACE_STREAK=0
+    WRONG_PLACE_NOTIFIED=false
 
     clear
     echo -e "${BGRN}╔══════════════════════════════════════════╗${NC}"

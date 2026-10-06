@@ -24,6 +24,17 @@ for item in VERSION auto_rejoin.sh setup.sh bin lib keys README.md CHANGELOG.md 
     fi
 done
 
+# Build tren Windows (core.autocrlf=true) co the mang CRLF vao script -> Termux bao "$'\r': command not found".
+crlf_files=""
+while IFS= read -r f; do
+    [ "$(tr -cd '\r' < "$f" | wc -c)" -eq 0 ] || crlf_files="${crlf_files} ${f#"${WORK_DIR}/"}"
+done < <(find "${WORK_DIR}/auto-rejoin-${VERSION}" -type f \( -name '*.sh' -o -name '*.lua' -o -name 'roblox-manager' -o -name 'VERSION' \))
+if [ -n "$crlf_files" ]; then
+    echo "[build-release] Script co CRLF, khong build:${crlf_files}" >&2
+    echo "[build-release] Sua: git add --renormalize . && git checkout -- . (repo da co .gitattributes eol=lf)" >&2
+    exit 1
+fi
+
 tar -czf "${OUTPUT_DIR}/auto-rejoin-${VERSION}.tar.gz" -C "${WORK_DIR}/auto-rejoin-${VERSION}" .
 sha="$(sha256sum "${OUTPUT_DIR}/auto-rejoin-${VERSION}.tar.gz" | awk '{print $1}')"
 size="$(stat -c %s "${OUTPUT_DIR}/auto-rejoin-${VERSION}.tar.gz" 2>/dev/null || wc -c < "${OUTPUT_DIR}/auto-rejoin-${VERSION}.tar.gz" | tr -d ' ')"

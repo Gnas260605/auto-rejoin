@@ -52,25 +52,73 @@ bootstrap_download() {
         "$url"
 }
 
-download_or_keep_local() {
-    local url="$1"
-    local target="$2"
-    local label="$3"
+# Nguồn cài đặt. AUTO_REJOIN_REF nhận tên nhánh, tag (vd v4.5.0) hoặc commit SHA.
+# Production: ghim về tag cố định, ví dụ AUTO_REJOIN_REF=v4.5.0 bash setup.sh <PLACE_ID>.
+AUTO_REJOIN_REPO="${AUTO_REJOIN_REPO:-Gnas260605/auto-rejoin}"
+AUTO_REJOIN_REF="${AUTO_REJOIN_REF:-main}"
+SETUP_LIB_FILES=(config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh)
 
-    if bootstrap_download "$url" "${target}.tmp" 2>/dev/null && [ -s "${target}.tmp" ]; then
-        mv "${target}.tmp" "$target"
-        echo -e "  ${BGRN}✓ Đã cập nhật ${label} từ GitHub${NC}"
+setup_install_files() {
+    local f
+    printf '%s\n' auto_rejoin.sh bin/roblox-manager VERSION
+    for f in "${SETUP_LIB_FILES[@]}"; do printf 'lib/%s\n' "$f"; done
+}
+
+# Chốt ref về 1 commit SHA để mọi file tải về cùng một phiên bản (tránh dính push giữa chừng).
+# GitHub API lỗi/rate-limit -> dùng nguyên ref.
+resolve_install_ref() {
+    local ref="$1" sha=""
+    if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+        printf '%s\n' "$ref"
         return 0
     fi
-
-    rm -f "${target}.tmp"
-    if [ -f "$target" ]; then
-        echo -e "  ${YLW}⚠ Không thể tải ${label}; giữ bản local hiện có${NC}"
-        return 0
+    sha="$(curl --fail --location --silent --connect-timeout 10 --max-time 20 \
+        -H 'Accept: application/vnd.github.sha' \
+        "https://api.github.com/repos/${AUTO_REJOIN_REPO}/commits/${ref}" 2>/dev/null | tr -d '\r\n')"
+    if printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+        printf '%s\n' "$sha"
+    else
+        printf '%s\n' "$ref"
     fi
+}
 
-    echo -e "  ${RED}✗ Không thể tải ${label} và chưa có file local${NC}"
-    return 1
+local_install_complete() {
+    local rel
+    while IFS= read -r rel; do
+        [ "$rel" = "VERSION" ] && continue
+        [ -s "$rel" ] || return 1
+    done < <(setup_install_files)
+}
+
+# Tất cả hoặc không gì cả: tải toàn bộ vào thư mục tạm, kiểm tra cú pháp, đủ file mới thay bản đang chạy.
+install_snapshot() {
+    local ref="$1"
+    local base="https://raw.githubusercontent.com/${AUTO_REJOIN_REPO}/${ref}"
+    local stage="${TMP_DIR}/setup-stage.$$"
+    local rel
+
+    rm -rf "$stage"
+    mkdir -p "$stage/lib" "$stage/bin" || return 1
+    while IFS= read -r rel; do
+        if ! bootstrap_download "${base}/${rel}" "${stage}/${rel}" 2>/dev/null || [ ! -s "${stage}/${rel}" ]; then
+            echo -e "  ${YLW}⚠ Không tải được ${rel}${NC}"
+            rm -rf "$stage"
+            return 1
+        fi
+        # Chặn file CRLF và file hỏng (vd trang lỗi HTML) trước khi chạm vào bản đang chạy.
+        sed -i 's/\r$//' "${stage}/${rel}" 2>/dev/null || true
+        if [ "$rel" != "VERSION" ] && ! bash -n "${stage}/${rel}" 2>/dev/null; then
+            echo -e "  ${RED}✗ ${rel} tải về bị lỗi cú pháp, huỷ cập nhật${NC}"
+            rm -rf "$stage"
+            return 1
+        fi
+    done < <(setup_install_files)
+
+    mkdir -p lib bin
+    while IFS= read -r rel; do
+        mv -f "${stage}/${rel}" "$rel" || { rm -rf "$stage"; return 1; }
+    done < <(setup_install_files)
+    rm -rf "$stage"
 }
 
 # ── Progress bar ─────────────────────────────────────────
@@ -172,31 +220,19 @@ echo ""
 echo -e "${BGRN}╔══════════════════════════════════════════════════╗${NC}"
 echo -e "${BGRN}║  [BƯỚC 2/4] Tải script auto_rejoin.sh           ║${NC}"
 echo -e "${BGRN}╚══════════════════════════════════════════════════╝${NC}"
-SCRIPT_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/auto_rejoin.sh"
 progress_bar 1 4 "Đang kết nối GitHub..."
-sleep 0.3
-progress_bar 2 4 "Đang cập nhật script..."
-download_or_keep_local "$SCRIPT_URL" "auto_rejoin.sh" "auto_rejoin.sh" || exit 1
-progress_bar 4 4 "Hoàn tất!"
-mkdir -p lib
-for lib_file in config.sh android.sh network.sh logger.sh runtime.sh roblox_session.sh session_evidence.sh roblox_api.sh notification.sh monitor.sh roblox.sh doctor.sh ui.sh profile.sh installer.sh license.sh entitlement.sh updater.sh cookie.sh delta.sh; do
-    LIB_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/lib/${lib_file}"
-    download_or_keep_local "$LIB_URL" "lib/${lib_file}" "lib/${lib_file}" || true
-done
-mkdir -p bin
-CLI_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/bin/roblox-manager"
-download_or_keep_local "$CLI_URL" "bin/roblox-manager" "bin/roblox-manager" || true
-if [ ! -f "VERSION" ]; then
-    VERSION_URL="https://raw.githubusercontent.com/Gnas260605/auto-rejoin/main/VERSION"
-    if bootstrap_download "$VERSION_URL" "VERSION.tmp" 2>/dev/null && [ -s "VERSION.tmp" ]; then
-        mv "VERSION.tmp" "VERSION"
-        echo -e "  ${BGRN}✓ Đã tải VERSION${NC}"
-    else
-        rm -f "VERSION.tmp"
-        printf '4.0.0-dev\n' > VERSION
-        echo -e "  ${YLW}⚠ Không thể tải VERSION; dùng 4.0.0-dev${NC}"
-    fi
+SETUP_REF="$(resolve_install_ref "$AUTO_REJOIN_REF")"
+progress_bar 2 4 "Đang tải bản ${SETUP_REF:0:12}..."
+if install_snapshot "$SETUP_REF"; then
+    progress_bar 4 4 "Hoàn tất!"
+    echo -e "  ${BGRN}✓ Đã cài đồng bộ $(tr -d '\r\n' < VERSION 2>/dev/null) (ref ${SETUP_REF:0:12})${NC}"
+elif local_install_complete; then
+    echo -e "  ${YLW}⚠ Không tải được bản mới; giữ nguyên bản local đang có (không trộn file cũ/mới)${NC}"
+else
+    echo -e "  ${RED}✗ Không tải được tool và máy chưa có bản cài đầy đủ. Kiểm tra mạng rồi chạy lại setup.sh${NC}"
+    exit 1
 fi
+[ -f VERSION ] || printf '4.0.0-dev\n' > VERSION
 chmod +x auto_rejoin.sh setup.sh lib/*.sh bin/roblox-manager 2>/dev/null
 echo ""
 

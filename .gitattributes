@@ -1,0 +1,6 @@
+# Script chạy trên Termux/Android: bắt buộc LF, kể cả khi checkout trên Windows (core.autocrlf=true).
+*.sh               text eol=lf
+*.lua              text eol=lf
+bin/roblox-manager text eol=lf
+VERSION            text eol=lf
+*.pem              text eol=lf
