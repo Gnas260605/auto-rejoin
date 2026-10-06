@@ -5,7 +5,8 @@ import {
 import {
   LICENSE_STATUSES,
   DEFAULT_PRICING_PLANS,
-  PLAN_ENTITLEMENTS
+  PLAN_ENTITLEMENTS,
+  resolvePlanEntitlements
 } from "../constants/license.js";
 import {
   comparePassword,
@@ -266,7 +267,7 @@ export class AdminService {
     });
 
     const items = result.items.map((lic) => {
-      const entitlements = PLAN_ENTITLEMENTS[lic.plan] || PLAN_ENTITLEMENTS.basic;
+      const entitlements = resolvePlanEntitlements(lic.plan);
       return {
         id: lic.id,
         displayKey: `${lic.license_key_prefix}••••••••••••${lic.license_key_last4}`,
@@ -575,7 +576,7 @@ ${allInOneCommand}
       throw new AdminServiceError("LICENSE_NOT_FOUND", "License not found", 404);
     }
 
-    const entitlements = PLAN_ENTITLEMENTS[lic.plan] || PLAN_ENTITLEMENTS.basic;
+    const entitlements = resolvePlanEntitlements(lic.plan);
 
     return {
       id: lic.id,

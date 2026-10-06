@@ -4,7 +4,8 @@ import {
   LICENSE_KEY_PATTERN,
   LICENSE_STATUSES,
   DEFAULT_PRICING_PLANS,
-  PLAN_ENTITLEMENTS
+  PLAN_ENTITLEMENTS,
+  resolvePlanEntitlements
 } from "../constants/license.js";
 import { errorResponse, successResponse } from "../utils/response.js";
 import { isExpired, secondsFromNow } from "../utils/time.js";
@@ -53,7 +54,7 @@ export class LicenseService {
   }
 
   entitlementsForPlan(plan) {
-    return PLAN_ENTITLEMENTS[plan] || PLAN_ENTITLEMENTS.basic;
+    return resolvePlanEntitlements(plan);
   }
 
   responseForLicense(license, token) {

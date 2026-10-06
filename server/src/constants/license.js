@@ -37,6 +37,17 @@ export const PLAN_ENTITLEMENTS = Object.freeze({
   }
 });
 
+// Gói do Shop (ShopRoblox) bán có mã "plan_*" (plan_1day, plan_7days, plan_30days, plan_lifetime...).
+// Quyết định 06/10/2026: mọi gói Shop bán đều được đủ quyền tính năng; số máy giới hạn theo max_devices của key.
+export const SHOP_PLAN_PREFIX = "plan_";
+export const SHOP_PLAN_ENTITLEMENT = "business";
+
+export function resolvePlanEntitlements(plan) {
+  if (PLAN_ENTITLEMENTS[plan]) return PLAN_ENTITLEMENTS[plan];
+  if (typeof plan === "string" && plan.startsWith(SHOP_PLAN_PREFIX)) return PLAN_ENTITLEMENTS[SHOP_PLAN_ENTITLEMENT];
+  return PLAN_ENTITLEMENTS.basic;
+}
+
 export const DEFAULT_PRICING_PLANS = Object.freeze([
   {
     id: "trial_4h",

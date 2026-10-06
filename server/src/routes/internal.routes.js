@@ -2,6 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 import { hashLicenseKey, displayPartsForKey, normalizeLicenseKey } from "../utils/token.js";
 import { isoNow } from "../utils/time.js";
+import { safeEqualSecret } from "../utils/crypto.js";
+import { maskInstallationId } from "../utils/admin-auth.js";
 
 const provisionSchema = z.object({
   rawKey: z.string().min(10).max(100),
@@ -29,6 +31,35 @@ const extendSchema = z.object({
   message: "Either rawKey or keyHash must be provided"
 });
 
+const keyRefSchema = z.object({
+  rawKey: z.string().max(100).optional(),
+  keyHash: z.string().max(128).optional()
+}).refine(data => data.rawKey || data.keyHash, {
+  message: "Either rawKey or keyHash must be provided"
+});
+
+const resetDevicesSchema = z.object({
+  rawKey: z.string().max(100).optional(),
+  keyHash: z.string().max(128).optional(),
+  // Bỏ trống = reset tất cả thiết bị đang hoạt động của key
+  deviceId: z.number().int().positive().optional()
+}).refine(data => data.rawKey || data.keyHash, {
+  message: "Either rawKey or keyHash must be provided"
+});
+
+function toDeviceView(d) {
+  return {
+    id: Number(d.id),
+    installationId: maskInstallationId(d.installation_id),
+    deviceName: d.device_name || null,
+    platform: d.platform || null,
+    executor: d.executor || null,
+    clientVersion: d.client_version || null,
+    firstActivatedAt: d.first_activated_at ? new Date(d.first_activated_at).toISOString() : null,
+    lastSeenAt: d.last_seen_at ? new Date(d.last_seen_at).toISOString() : null
+  };
+}
+
 export function createInternalRouter({ licenseRepository, config }) {
   const router = Router();
   const internalApiKey = config.internalApiKey || process.env.INTERNAL_API_KEY || "";
@@ -45,7 +76,7 @@ export function createInternalRouter({ licenseRepository, config }) {
       return next();
     }
 
-    if (!providedKey || providedKey !== internalApiKey) {
+    if (!safeEqualSecret(String(providedKey || ""), internalApiKey)) {
       return res.status(401).json({ ok: false, message: "Unauthorized: Invalid or missing internal API key" });
     }
     next();
@@ -121,7 +152,8 @@ export function createInternalRouter({ licenseRepository, config }) {
 
       const { rawKey, keyHash: providedHash } = parsed.data;
       const pepper = config.license?.keyPepper || process.env.LICENSE_KEY_PEPPER;
-      const keyHash = providedHash || hashLicenseKey(normalizeLicenseKey(rawKey), pepper);
+      // Ưu tiên rawKey: keyHash do Shop gửi được tính bằng pepper của Shop, không khớp DB này.
+      const keyHash = rawKey ? hashLicenseKey(normalizeLicenseKey(rawKey), pepper) : providedHash;
 
       const pool = licenseRepository.pool;
 
@@ -144,17 +176,87 @@ export function createInternalRouter({ licenseRepository, config }) {
         [licenseId]
       );
 
-      // Revoke all devices
-      await pool.query(
-        "UPDATE license_devices SET status = 'revoked', updated_at = NOW() WHERE license_id = ?",
-        [licenseId]
-      );
+      // Revoke all devices (license_devices không có cột status; thu hồi bằng revoked_at)
+      await licenseRepository.revokeAllDevicesForLicense(licenseId);
 
       return res.json({
         ok: true,
         message: "License revoked and all active device sessions invalidated successfully",
         licenseId
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const findLicenseForRef = async ({ rawKey, keyHash }) => {
+    const pepper = config.license?.keyPepper || process.env.LICENSE_KEY_PEPPER;
+    const hash = rawKey ? hashLicenseKey(normalizeLicenseKey(rawKey), pepper) : keyHash;
+    return licenseRepository.findLicenseByKeyHash(hash);
+  };
+
+  // Xem thiết bị đang dùng 1 key (cho admin Shop)
+  router.post("/licenses/devices", async (req, res, next) => {
+    try {
+      const parsed = keyRefSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ ok: false, message: parsed.error.errors[0]?.message || "Invalid payload" });
+      }
+      const license = await findLicenseForRef(parsed.data);
+      if (!license) {
+        return res.status(404).json({ ok: false, message: "License not found in authority DB" });
+      }
+      const devices = await licenseRepository.listActiveDevicesForLicense(license.id);
+      return res.json({
+        ok: true,
+        license: {
+          status: license.status,
+          plan: license.plan,
+          maxDevices: Number(license.max_devices),
+          expiresAt: license.expires_at ? new Date(license.expires_at).toISOString() : null,
+          activeDevices: devices.length
+        },
+        devices: devices.map(toDeviceView)
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Reset thiết bị: thu hồi 1 máy (deviceId) hoặc tất cả, để khách kích hoạt lại trên máy mới
+  router.post("/licenses/devices/reset", async (req, res, next) => {
+    try {
+      const parsed = resetDevicesSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ ok: false, message: parsed.error.errors[0]?.message || "Invalid payload" });
+      }
+      const license = await findLicenseForRef(parsed.data);
+      if (!license) {
+        return res.status(404).json({ ok: false, message: "License not found in authority DB" });
+      }
+
+      const { deviceId } = parsed.data;
+      let revoked = 0;
+      if (deviceId) {
+        const devices = await licenseRepository.listActiveDevicesForLicense(license.id);
+        if (!devices.some((d) => Number(d.id) === deviceId)) {
+          return res.status(404).json({ ok: false, message: "Device not found or already reset for this license" });
+        }
+        await licenseRepository.revokeDeviceAndTokens(deviceId);
+        revoked = 1;
+      } else {
+        revoked = (await licenseRepository.listActiveDevicesForLicense(license.id)).length;
+        await licenseRepository.revokeAllDevicesForLicense(license.id);
+      }
+
+      await licenseRepository.insertEvent({
+        licenseId: license.id,
+        deviceId: deviceId || null,
+        eventType: "device_reset_by_shop",
+        metadata: { scope: deviceId ? "single" : "all", revoked, source: "shop_admin" }
+      }).catch(() => {});
+
+      return res.json({ ok: true, revoked, message: deviceId ? "Device reset" : "All devices reset" });
     } catch (err) {
       next(err);
     }
@@ -170,7 +272,8 @@ export function createInternalRouter({ licenseRepository, config }) {
 
       const { rawKey, keyHash: providedHash, daysToAdd, newExpiresAt } = parsed.data;
       const pepper = config.license?.keyPepper || process.env.LICENSE_KEY_PEPPER;
-      const keyHash = providedHash || hashLicenseKey(normalizeLicenseKey(rawKey), pepper);
+      // Ưu tiên rawKey: keyHash do Shop gửi được tính bằng pepper của Shop, không khớp DB này.
+      const keyHash = rawKey ? hashLicenseKey(normalizeLicenseKey(rawKey), pepper) : providedHash;
 
       const pool = licenseRepository.pool;
       const [rows] = await pool.query("SELECT id, expires_at FROM licenses WHERE license_key_hash = ? LIMIT 1", [keyHash]);
