@@ -339,6 +339,29 @@ monitor_confirmed_game_active() {
     is_in_game
 }
 
+# Cửa sổ Roblox biến mất nhưng process còn sống (vd. UGPhone/freeform thu nhỏ thành bong bóng):
+# đưa task lên lại bằng intent LAUNCHER (monkey) — không kill, không rejoin, giữ nguyên phiên game.
+# Giới hạn 1 lần / WINDOW_RESTORE_COOLDOWN giây. Trả 1 khi không thực hiện được (gọi bên ngoài tự xử lý).
+WINDOW_RESTORE_COOLDOWN="${WINDOW_RESTORE_COOLDOWN:-60}"
+WINDOW_RESTORE_LAST_AT="${WINDOW_RESTORE_LAST_AT:-0}"
+
+monitor_restore_window() {
+    local now
+    declare -F android_monkey_package >/dev/null 2>&1 || return 1
+    now="$(monitor_now)"
+    if [ $((now - ${WINDOW_RESTORE_LAST_AT:-0})) -lt "$WINDOW_RESTORE_COOLDOWN" ]; then
+        return 0
+    fi
+    WINDOW_RESTORE_LAST_AT="$now"
+    if android_monkey_package "$ROBLOX_PACKAGE" >/dev/null 2>&1; then
+        log_event WARN window_restored "$LOG_FILE" package "$ROBLOX_PACKAGE" state "$MONITOR_STATE"
+        log_msg "${YLW}[WINDOW]${NC} Cửa sổ Roblox bị thu nhỏ/ẩn — đã đưa lên lại (không tắt game)."
+        return 0
+    fi
+    log_event WARN window_restore_failed "$LOG_FILE" package "$ROBLOX_PACKAGE"
+    return 1
+}
+
 monitor_non_destructive_wake() {
     local reason="${1:-unknown_active_wake}"
     log_event INFO startup_non_destructive_wake "$LOG_FILE" package "$ROBLOX_PACKAGE" reason "$reason"
@@ -479,9 +502,12 @@ monitor_handle_loading() {
             log_event WARN window_missing "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" count "$WINDOW_MISSING_COUNT" threshold "$WINDOW_MISSING_THRESHOLD"
             log_msg "${YLW}[WINDOW]${NC} Không thấy cửa sổ Roblox (Lần $WINDOW_MISSING_COUNT/$WINDOW_MISSING_THRESHOLD)..."
             if [ "$WINDOW_MISSING_COUNT" -ge "$WINDOW_MISSING_THRESHOLD" ]; then
+                WINDOW_MISSING_COUNT=0
+                # Game vẫn chạy: đưa cửa sổ lên lại, giữ nguyên state. Chỉ khi không làm được mới chuyển
+                # UNKNOWN_ACTIVE (trước đây luôn chuyển → UNKNOWN_ACTIVE ↔ IN_GAME lặp mãi, bong bóng không mở lại).
+                monitor_restore_window && return 0
                 log_msg "${RED}[WINDOW]${NC} Cửa sổ Roblox bị đóng! Tự động mở lại game..."
                 log_event WARN window_visibility_unknown "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
-                WINDOW_MISSING_COUNT=0
                 monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "window_visibility_unknown"
                 return 0
             fi
@@ -587,9 +613,12 @@ monitor_handle_in_game() {
             log_event WARN window_missing "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID" count "$WINDOW_MISSING_COUNT" threshold "$WINDOW_MISSING_THRESHOLD"
             log_msg "${YLW}[WINDOW]${NC} Không thấy cửa sổ Roblox khi đang chơi ($WINDOW_MISSING_COUNT/$WINDOW_MISSING_THRESHOLD)..."
             if [ "$WINDOW_MISSING_COUNT" -ge "$WINDOW_MISSING_THRESHOLD" ]; then
+                WINDOW_MISSING_COUNT=0
+                # Game vẫn chạy: đưa cửa sổ lên lại, giữ nguyên state. Chỉ khi không làm được mới chuyển
+                # UNKNOWN_ACTIVE (trước đây luôn chuyển → UNKNOWN_ACTIVE ↔ IN_GAME lặp mãi, bong bóng không mở lại).
+                monitor_restore_window && return 0
                 log_msg "${RED}[WINDOW]${NC} Cửa sổ Roblox bị đóng! Tự động mở lại game..."
                 log_event WARN window_visibility_unknown "$LOG_FILE" package "$ROBLOX_PACKAGE" place_id "$PLACE_ID"
-                WINDOW_MISSING_COUNT=0
                 monitor_transition "$MONITOR_STATE_UNKNOWN_ACTIVE" "window_visibility_unknown"
                 return 0
             fi

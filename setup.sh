@@ -353,19 +353,21 @@ if declare -F android_list_packages >/dev/null 2>&1; then
     [ -z "$PACKAGES" ] && PACKAGES=$(android_list_packages 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r')
 else
     case "$EXECUTOR_TYPE" in
-        su)     PACKAGES=$(su -c "pm list packages -3" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
-        adb)    PACKAGES=$(adb shell "pm list packages -3" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+        su)     PACKAGES=$(su -c "pm list packages -3" </dev/null 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+        adb)    PACKAGES=$(adb shell "pm list packages -3" </dev/null 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
         *)      PACKAGES=$(pm list packages -3 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
     esac
     if [ -z "$PACKAGES" ]; then
         case "$EXECUTOR_TYPE" in
-            su)     PACKAGES=$(su -c "pm list packages" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
-            adb)    PACKAGES=$(adb shell "pm list packages" 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+            su)     PACKAGES=$(su -c "pm list packages" </dev/null 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
+            adb)    PACKAGES=$(adb shell "pm list packages" </dev/null 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
             *)      PACKAGES=$(pm list packages 2>/dev/null | grep -iE "$CLONE_PATTERN" | cut -d: -f2 | tr -d '\r') ;;
         esac
     fi
 fi
 
+# su/adb trên một số máy đổi chế độ terminal (mất "về đầu dòng" → chữ xếp bậc thang). Khôi phục lại.
+[ -t 1 ] && stty sane 2>/dev/null
 progress_bar 2 3 "Phân tích danh sách..."
 sleep 0.3
 

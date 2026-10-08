@@ -711,5 +711,45 @@ test_unknown_active_wake_fails_then_stalls
 test_task_present_not_in_game_without_ready
 test_stalled_active_authorizes_controlled_recovery
 
+# Cửa sổ bị thu nhỏ thành bong bóng (process còn sống): đưa lên lại bằng monkey, không kill, không rời IN_GAME.
+test_minimized_window_restored_without_kill() {
+    reset_monitor_state
+    MONKEY_COUNT=0
+    MONKEY_OK=true
+    android_monkey_package() { MONKEY_COUNT=$((MONKEY_COUNT + 1)); [ "$MONKEY_OK" = "true" ]; }
+    WINDOW_RESTORE_LAST_AT=0
+    LAST_IN_GAME=900
+    IN_GAME=true
+    WINDOW_VISIBLE=false
+    WINDOW_MISSING_THRESHOLD=3
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    MONITOR_NOW=1000
+    monitor_tick; monitor_tick
+    assert_eq "23 below threshold: no restore yet" "0" "$MONKEY_COUNT"
+    monitor_tick
+    assert_eq "23 threshold: window restored once" "1" "$MONKEY_COUNT"
+    assert_eq "23 restore keeps IN_GAME" "$MONITOR_STATE_IN_GAME" "$MONITOR_STATE"
+    assert_eq "23 restore never force-stops" "0" "$FORCE_STOP_COUNT"
+    assert_eq "23 restore never relaunches" "0" "$LAUNCH_COUNT"
+    assert_contains "23 restore logged" "window_restored" "$LOG_FILE"
+
+    MONITOR_NOW=1030
+    monitor_tick; monitor_tick; monitor_tick
+    assert_eq "23 cooldown: no second restore within 60s" "1" "$MONKEY_COUNT"
+    MONITOR_NOW=1100
+    monitor_tick; monitor_tick; monitor_tick
+    assert_eq "23 after cooldown: restore again" "2" "$MONKEY_COUNT"
+
+    MONKEY_OK=false
+    WINDOW_RESTORE_LAST_AT=0
+    MONITOR_STATE="$MONITOR_STATE_IN_GAME"
+    WINDOW_MISSING_COUNT=0
+    monitor_tick; monitor_tick; monitor_tick
+    assert_eq "23 restore failed -> UNKNOWN_ACTIVE (old safe path)" "$MONITOR_STATE_UNKNOWN_ACTIVE" "$MONITOR_STATE"
+    assert_eq "23 restore failed still no force-stop" "0" "$FORCE_STOP_COUNT"
+    unset -f android_monkey_package
+}
+test_minimized_window_restored_without_kill
+
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

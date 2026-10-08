@@ -262,6 +262,15 @@ get_roblox_username() {
     local pkg="${1:-$ROBLOX_PACKAGE}"
     local uname=""
 
+    # 0. Nguồn tin cậy: appStorage.json của app / userId trong log + API Roblox (lib/worker.sh).
+    if declare -F worker_detect_username >/dev/null 2>&1; then
+        uname="$(worker_detect_username "$pkg")"
+        if [ -n "$uname" ]; then
+            echo "$uname"
+            return 0
+        fi
+    fi
+
     # 1. Đọc từ file do Lua Companion Script xuất ra (chính xác 100% khi game chạy)
     local user_file_paths=(
         "/sdcard/Android/data/$pkg/files/roblox_username.txt"
@@ -273,10 +282,10 @@ get_roblox_username() {
         "/sdcard/Hydrogen/workspace/roblox_username.txt"
     )
     for ufp in "${user_file_paths[@]}"; do
-        if [ -n "$(android_exec cat "$ufp" 2>/dev/null | tr -d '
+        if [ -n "$(android_exec grep -m 1 . "$ufp" 2>/dev/null | tr -d '
 
 ')" ]; then
-            uname=$(android_exec cat "$ufp" 2>/dev/null | head -n 1 | tr -d '
+            uname=$(android_exec grep -m 1 . "$ufp" 2>/dev/null | head -n 1 | tr -d '
 
  ')
             [ -n "$uname" ] && break
@@ -356,6 +365,8 @@ get_roblox_username() {
         uname=$(grep '^ROBLOX_USERNAME=' "$cfg" 2>/dev/null | cut -d'"' -f2)
     fi
 
+    # Chỉ trả tên đúng chuẩn Roblox (3-20 ký tự chữ/số/_). Giá trị đoán sai từ prefs/log → N/A.
+    [[ "$uname" =~ ^[A-Za-z0-9_]{3,20}$ ]] || uname=""
     echo "${uname:-N/A}"
 }
 
@@ -1488,6 +1499,8 @@ view_clone_detail() {
 show_menu() {
     load_config
     init_executor
+    # su/adb có thể làm hỏng chế độ terminal (chữ xếp bậc thang); khôi phục trước khi vẽ menu.
+    [ -t 1 ] && stty sane 2>/dev/null
     clear
     draw_header
     echo ""

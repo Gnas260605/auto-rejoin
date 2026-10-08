@@ -292,6 +292,58 @@ SHOP_API_URL=""
 worker_load_shared_config "$SHARED"
 assert_eq "shared: invalid url rejected" "" "$SHOP_API_URL"
 
+# ── Nhận diện tên acc ──────────────────────────────────
+APP_STORAGE_OUT=""
+LOG_TAIL_OUT=""
+API_JSON=""
+API_CALLS_FILE="${TEST_TMP}/api_calls"
+android_exec() {
+    if [ "$1" = "grep" ] && [[ "${*: -1}" == *appStorage.json ]] && [[ "${*: -1}" == /data/data/* ]]; then
+        [ -n "$APP_STORAGE_OUT" ] && { printf '%s\n' "$APP_STORAGE_OUT"; return 0; }
+    fi
+    return 1
+}
+android_latest_log_file() { [ -n "$LOG_TAIL_OUT" ] && printf 'log_1.txt\n'; }
+android_tail_lines() { printf '%s\n' "$LOG_TAIL_OUT"; }
+roblox_http_get() { printf 'x' >> "$API_CALLS_FILE"; printf '%s\n' "$API_JSON"; }
+api_calls() { if [ -f "$API_CALLS_FILE" ]; then wc -c < "$API_CALLS_FILE" | tr -d ' '; else printf '0'; fi; }
+reset_name_case() {
+    reset_case "$1"; ROBLOX_USERNAME=""; APP_STORAGE_OUT=""; LOG_TAIL_OUT=""; API_JSON=""
+    rm -f "$API_CALLS_FILE" "$TMP_DIR"/username_*
+}
+
+reset_name_case com.roblox.client
+APP_STORAGE_OUT='"Username":"PhamTuan_09"
+"UserId":"123456789"'
+assert_eq "username from appStorage.json" "PhamTuan_09" "$(worker_detect_username)"
+assert_eq "appStorage: no API call" "0" "$(api_calls)"
+
+reset_name_case aya.gdgyhvc
+LOG_TAIL_OUT='2026-10-08 [FLog::Output] Joining game place 2753915549 userId: 4455667788 jobId abc'
+API_JSON='{"description":"","created":"2020-01-01","id":4455667788,"name":"Khach_Vng77","displayName":"Khách VNG"}'
+assert_eq "username from log userId + Roblox API" "Khach_Vng77" "$(worker_detect_username)"
+assert_eq "cached: second call no API" "Khach_Vng77" "$(worker_detect_username)"
+assert_eq "cached: one API call total" "1" "$(api_calls)"
+
+reset_name_case aya.mvctjbsksb
+APP_STORAGE_OUT='"Username":"Tên có dấu"'
+assert_eq "invalid name rejected" "" "$(worker_detect_username)"
+
+reset_name_case aya.pdnfbgdufb
+ROBLOX_USERNAME="Config_Name"
+assert_eq "fallback to valid config username" "Config_Name" "$(worker_account_username)"
+ROBLOX_USERNAME="N/A"
+assert_eq "invalid config username ignored" "" "$(worker_account_username)"
+
+reset_name_case aya.vyyegb
+API_JSON='{"id":1,"name":"Acc_Moi"}'
+LOG_TAIL_OUT='userid=99887766'
+worker_detect_username >/dev/null
+assert_contains "heartbeat sends detected name" '"account_username":"Acc_Moi"' "$(worker_build_heartbeat)"
+HTTP_RESPONSE='{"action":"COMPLETE_LOGOUT"}'
+worker_tick
+assert_eq "logout clears username cache" "false" "$([ -f "$(worker_username_cache_file)" ] && echo true || echo false)"
+
 # ── Jitter ──────────────────────────────────────────────
 j="$(monitor_tick_jitter com.roblox.client.vnggames)"
 if [ "$j" -ge 0 ] && [ "$j" -le 4 ]; then pass "jitter in 0..4"; else fail "jitter out of range: $j"; fi

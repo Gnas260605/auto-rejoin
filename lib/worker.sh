@@ -127,6 +127,108 @@ worker_http() {
     printf 'Authorization: Bearer %s\n' "$SHOP_WORKER_TOKEN" | curl "${args[@]}" "${SHOP_API_URL}${path}"
 }
 
+# ── Tên acc Roblox đang đăng nhập trong tab ─────────────────────────────────
+# Nguồn tin cậy, theo thứ tự: appStorage.json của app (cần root) → userId trong log Roblox + API
+# users.roblox.com. Chỉ nhận tên đúng chuẩn Roblox. Cache theo package (tmp/username_<pkg>) để không
+# gọi API mỗi heartbeat; xoá cache khi tab trả acc (worker_forget_username).
+WORKER_USERNAME_REFRESH="${WORKER_USERNAME_REFRESH:-600}"
+WORKER_USERNAME_RETRY="${WORKER_USERNAME_RETRY:-120}"
+
+worker_valid_username() {
+    [[ "${1:-}" =~ ^[A-Za-z0-9_]{3,20}$ ]]
+}
+
+worker_username_cache_file() {
+    printf '%s/username_%s\n' "${TMP_DIR:-tmp}" "$(worker_safe_package "${1:-$ROBLOX_PACKAGE}")"
+}
+
+worker_forget_username() {
+    rm -f "$(worker_username_cache_file "${1:-$ROBLOX_PACKAGE}")"
+}
+
+# In "userId|username" đọc từ appStorage.json (Roblox lưu acc đang đăng nhập ở đây).
+worker_username_from_app_storage() {
+    local package="$1" dir out name uid
+    for dir in "/data/data/${package}/files/appData/LocalStorage" "/sdcard/Android/data/${package}/files/appData/LocalStorage"; do
+        out="$(android_exec grep -oE '"(Username|UserId)":"?[^",}]*' "${dir}/appStorage.json" 2>/dev/null | tr -d '\r')"
+        [ -n "$out" ] || continue
+        name="$(printf '%s\n' "$out" | sed -n 's/^"Username":"\{0,1\}//p' | head -n 1 | tr -d '"')"
+        uid="$(printf '%s\n' "$out" | sed -n 's/^"UserId":"\{0,1\}//p' | head -n 1)"
+        if worker_valid_username "$name"; then
+            printf '%s|%s\n' "${uid//[^0-9]/}" "$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# userId gần nhất trong log phiên Roblox hiện tại.
+worker_user_id_from_log() {
+    local package="$1" dir latest
+    for dir in "/sdcard/Android/data/${package}/files/logs" "/data/data/${package}/files/logs"; do
+        latest="$(android_latest_log_file "$dir" 2>/dev/null | head -n 1 | tr -d '\r\n')"
+        [ -n "$latest" ] || continue
+        android_tail_lines 400 "${dir}/${latest}" 2>/dev/null \
+            | grep -Eio 'user_?id["=: ]{1,4}[0-9]{3,12}' \
+            | grep -Eo '[0-9]{3,12}$' \
+            | tail -n 1
+        return 0
+    done
+    return 1
+}
+
+# Tên chính thức từ userId qua API công khai của Roblox.
+worker_username_from_user_id() {
+    local user_id="$1" json name
+    [[ "$user_id" =~ ^[0-9]{3,12}$ ]] || return 1
+    declare -F roblox_http_get >/dev/null 2>&1 || return 1
+    json="$(roblox_http_get "https://users.roblox.com/v1/users/${user_id}" "users" 2>/dev/null)" || return 1
+    name="$(worker_json_field "$json" name)"
+    worker_valid_username "$name" || return 1
+    printf '%s\n' "$name"
+}
+
+# In tên acc (có thể rỗng). Không bao giờ trả giá trị không đúng chuẩn Roblox.
+worker_detect_username() {
+    local package="${1:-$ROBLOX_PACKAGE}" cache now at name info uid
+    cache="$(worker_username_cache_file "$package")"
+    now="$(monitor_now)"
+    if [ -f "$cache" ]; then
+        IFS='|' read -r at name < "$cache"
+        if [[ "${at:-}" =~ ^[0-9]+$ ]]; then
+            if worker_valid_username "$name" && [ $((now - at)) -lt "$WORKER_USERNAME_REFRESH" ]; then
+                printf '%s\n' "$name"; return 0
+            fi
+            if [ -z "$name" ] && [ $((now - at)) -lt "$WORKER_USERNAME_RETRY" ]; then
+                return 0
+            fi
+        fi
+    fi
+
+    name=""
+    if info="$(worker_username_from_app_storage "$package")"; then
+        name="${info#*|}"
+    else
+        uid="$(worker_user_id_from_log "$package")"
+        [ -n "$uid" ] && name="$(worker_username_from_user_id "$uid")"
+    fi
+    worker_valid_username "$name" || name=""
+    mkdir -p "${TMP_DIR:-tmp}" 2>/dev/null
+    printf '%s|%s\n' "$now" "$name" > "$cache" 2>/dev/null
+    [ -n "$name" ] && printf '%s\n' "$name"
+    return 0
+}
+
+# Tên gửi lên Shop: tên nhận diện được từ app/log; không có thì ROBLOX_USERNAME trong config (nếu đúng chuẩn).
+worker_account_username() {
+    local name
+    name="$(worker_detect_username "$ROBLOX_PACKAGE")"
+    if [ -z "$name" ] && worker_valid_username "${ROBLOX_USERNAME:-}"; then
+        name="$ROBLOX_USERNAME"
+    fi
+    printf '%s\n' "$name"
+}
+
 worker_current_order_id() {
     printf '%s\n' "${ORDER_ID:-${WORKER_SERVER_ORDER_ID:-}}"
 }
@@ -143,7 +245,7 @@ worker_build_heartbeat() {
         "$(worker_json_string "$(worker_safe_package)")" \
         "$(worker_json_string "$ROBLOX_PACKAGE")" \
         "$(worker_json_string "$(worker_package_edition)")" \
-        "$(worker_json_string "${ROBLOX_USERNAME:-}")" \
+        "$(worker_json_string "$(worker_account_username)")" \
         "${order_id:-null}" \
         "$(worker_json_string "$status")" \
         "${free:-0}" "${total:-0}" \
@@ -248,6 +350,8 @@ worker_finish_order() {
     fi
     WORKER_LAST_RESULT="$result"
     WORKER_LAST_ORDER_ID="$order_id"
+    # Acc đã trả (hoặc sắp đổi acc): nhận diện lại tên ở heartbeat sau.
+    worker_forget_username "$ROBLOX_PACKAGE"
     log_event WARN order_finished "$LOG_FILE" package "$ROBLOX_PACKAGE" order_id "${order_id:-none}" command "$command" result "$result"
 
     local label
@@ -298,6 +402,7 @@ worker_handle_action() {
                 ORDER_ID="$WORKER_SERVER_ORDER_ID"
             fi
             WORKER_LAST_RESULT=""
+            worker_forget_username "$ROBLOX_PACKAGE"
             log_event INFO order_resume "$LOG_FILE" package "$ROBLOX_PACKAGE" order_id "${ORDER_ID:-none}"
             monitor_transition "$MONITOR_STATE_LAUNCHING" "order_assigned"
             ;;

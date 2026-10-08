@@ -21,15 +21,15 @@ export PATH="${PATH:-}:/system/bin:/system/xbin:/sbin:/vendor/bin"
 
 android_detect_executor() {
     export PATH="${PATH:-}:/system/bin:/system/xbin:/sbin:/vendor/bin"
-    if command -v su >/dev/null 2>&1 && android_with_timeout 3 su -c id >/dev/null 2>&1; then
+    if command -v su >/dev/null 2>&1 && android_with_timeout 3 su -c id </dev/null >/dev/null 2>&1; then
         echo "su"
-    elif [ -x /system/xbin/su ] && android_with_timeout 3 /system/xbin/su -c id >/dev/null 2>&1; then
+    elif [ -x /system/xbin/su ] && android_with_timeout 3 /system/xbin/su -c id </dev/null >/dev/null 2>&1; then
         echo "su"
-    elif [ -x /system/bin/su ] && android_with_timeout 3 /system/bin/su -c id >/dev/null 2>&1; then
+    elif [ -x /system/bin/su ] && android_with_timeout 3 /system/bin/su -c id </dev/null >/dev/null 2>&1; then
         echo "su"
-    elif command -v tsu >/dev/null 2>&1 && android_with_timeout 3 tsu -c id >/dev/null 2>&1; then
+    elif command -v tsu >/dev/null 2>&1 && android_with_timeout 3 tsu -c id </dev/null >/dev/null 2>&1; then
         echo "su"
-    elif command -v adb >/dev/null 2>&1 && android_with_timeout 3 adb shell id >/dev/null 2>&1; then
+    elif command -v adb >/dev/null 2>&1 && android_with_timeout 3 adb shell id </dev/null >/dev/null 2>&1; then
         echo "adb"
     else
         echo "direct"
@@ -94,10 +94,10 @@ android_exec() {
                 elif command -v tsu >/dev/null 2>&1; then su_bin="tsu"
                 fi
             fi
-            $su_bin -c "$(android_shell_quote "$command_name" "$@")"
+            $su_bin -c "$(android_shell_quote "$command_name" "$@")" </dev/null
             ;;
         adb)
-            adb shell "$command_name" "$@"
+            adb shell "$command_name" "$@" </dev/null
             ;;
         direct|"")
             "$command_name" "$@"
